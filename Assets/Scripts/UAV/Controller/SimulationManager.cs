@@ -62,6 +62,8 @@ public class SimulationManager : MonoBehaviour
         if (resetButton != null)
             resetButton.onClick.AddListener(OnResetClicked);
 
+        EnsureRuntimeControlPanel();
+
         // 初始化状态
         SetState(SimulationState.Idle);
     }
@@ -219,5 +221,20 @@ public class SimulationManager : MonoBehaviour
         }
 
         SetState(SimulationState.Idle);
+    }
+
+    private void EnsureRuntimeControlPanel()
+    {
+        SimulationRuntimeControlPanel runtimeControlPanel = FindObjectOfType<SimulationRuntimeControlPanel>();
+        if (runtimeControlPanel == null)
+        {
+            runtimeControlPanel = gameObject.AddComponent<SimulationRuntimeControlPanel>();
+        }
+
+        runtimeControlPanel.simulationManager = this;
+        if (runtimeControlPanel.droneManager == null)
+        {
+            runtimeControlPanel.droneManager = droneManager;
+        }
     }
 }

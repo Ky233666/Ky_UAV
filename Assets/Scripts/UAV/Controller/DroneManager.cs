@@ -237,6 +237,68 @@ public class DroneManager : MonoBehaviour
     }
 
     /// <summary>
+    /// Rebuilds the managed drone fleet with a new count.
+    /// </summary>
+    public void RespawnDrones(int count)
+    {
+        droneCount = Mathf.Max(1, count);
+        SpawnDrones(droneCount);
+    }
+
+    /// <summary>
+    /// Applies a shared flight speed to the prefab and all active drones.
+    /// </summary>
+    public void ApplyDroneSpeedToAll(float newSpeed)
+    {
+        float clampedSpeed = Mathf.Max(0.1f, newSpeed);
+
+        if (dronePrefab != null)
+        {
+            dronePrefab.speed = clampedSpeed;
+        }
+
+        foreach (DroneController drone in drones)
+        {
+            if (drone != null)
+            {
+                drone.speed = clampedSpeed;
+            }
+        }
+
+        foreach (DroneData data in droneDataList)
+        {
+            if (data != null)
+            {
+                data.speed = clampedSpeed;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Applies path visibility settings to all active drones.
+    /// </summary>
+    public void ApplyPathVisibilityToAll(bool showPlannedPath, bool showTrail)
+    {
+        foreach (DroneController drone in drones)
+        {
+            if (drone == null)
+            {
+                continue;
+            }
+
+            DronePathVisualizer pathVisualizer = drone.GetComponent<DronePathVisualizer>();
+            if (pathVisualizer == null)
+            {
+                pathVisualizer = drone.gameObject.AddComponent<DronePathVisualizer>();
+                pathVisualizer.droneController = drone;
+                pathVisualizer.droneData = GetDroneData(drone.droneId);
+            }
+
+            pathVisualizer.SetVisibility(showPlannedPath, showTrail);
+        }
+    }
+
+    /// <summary>
     /// 为指定无人机分配任务队列
     /// </summary>
     public void AssignTaskQueue(int droneId, TaskPoint[] tasks)
