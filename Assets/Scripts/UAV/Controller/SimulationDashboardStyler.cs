@@ -19,6 +19,7 @@ public class SimulationDashboardStyler : MonoBehaviour
     private const string HeaderBodyName = "__HeaderBody";
     private const string SubtitleName = "__SubtitleText";
     private const string StatusShellName = "__StatusShell";
+    private const string RightSidebarName = "__RightSidebar";
     private const string HintCardName = "__HintCard";
     private const string ControlCardName = "__ControlCard";
     private const string TaskCardName = "__TaskCard";
@@ -132,6 +133,7 @@ public class SimulationDashboardStyler : MonoBehaviour
             TMP_FontAsset font = preferredFont != null ? preferredFont : titleText.font;
 
             NormalizeCanvas(canvasRect);
+            RemoveLegacySidebar(canvasRect);
             SetupBackdrop(canvasRect);
             SetupHeader(canvasRect, titleText, statusText, font);
             SetupHintCard(canvasRect, font);
@@ -172,6 +174,27 @@ public class SimulationDashboardStyler : MonoBehaviour
     {
         canvasRect.localScale = Vector3.one;
         canvasRect.localRotation = Quaternion.identity;
+    }
+
+    private void RemoveLegacySidebar(RectTransform canvasRect)
+    {
+        Transform legacySidebar = canvasRect.Find(RightSidebarName);
+        if (legacySidebar == null)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            Destroy(legacySidebar.gameObject);
+            return;
+        }
+
+#if UNITY_EDITOR
+        DestroyImmediate(legacySidebar.gameObject);
+#else
+        Destroy(legacySidebar.gameObject);
+#endif
     }
 
     private void SetupBackdrop(RectTransform canvasRect)

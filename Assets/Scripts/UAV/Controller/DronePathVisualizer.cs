@@ -2,21 +2,23 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// 无人机路径可视化：
-/// 1. 显示当前规划路径
-/// 2. 显示实际飞行轨迹
+/// Visualizes planned paths and actual flight trails for each drone.
 /// </summary>
 public class DronePathVisualizer : MonoBehaviour
 {
-    [Header("关联对象")]
+    [Header("References")]
     public DroneController droneController;
     public DroneData droneData;
 
-    [Header("规划路径")]
+    [Header("Visibility")]
+    public bool showPlannedPath = true;
+    public bool showTrail = true;
+
+    [Header("Planned Path")]
     public Color plannedPathColor = new Color(0.2f, 0.9f, 1f, 0.95f);
     public float plannedPathWidth = 0.18f;
 
-    [Header("飞行轨迹")]
+    [Header("Flight Trail")]
     public Color trailColor = new Color(1f, 0.55f, 0.15f, 0.9f);
     public float trailWidth = 0.1f;
     public float trailPointSpacing = 0.5f;
@@ -58,7 +60,7 @@ public class DronePathVisualizer : MonoBehaviour
         trailPoints.Clear();
         if (droneController != null)
         {
-            trailPoints.Add(droneController.transform.position);
+            trailPoints.Add(droneController.transform.position + Vector3.up * 0.06f);
         }
 
         if (plannedPathRenderer != null)
@@ -74,12 +76,22 @@ public class DronePathVisualizer : MonoBehaviour
                 trailRenderer.SetPosition(0, trailPoints[0]);
             }
         }
+
+        ApplyVisibility();
+    }
+
+    public void SetVisibility(bool plannedVisible, bool trailVisible)
+    {
+        showPlannedPath = plannedVisible;
+        showTrail = trailVisible;
+        ApplyVisibility();
     }
 
     private void EnsureRenderers()
     {
         plannedPathRenderer = CreateRenderer("PlannedPath", plannedPathColor, plannedPathWidth, 10);
         trailRenderer = CreateRenderer("FlightTrail", trailColor, trailWidth, 5);
+        ApplyVisibility();
     }
 
     private LineRenderer CreateRenderer(string childName, Color color, float width, int sortingOrder)
@@ -129,6 +141,12 @@ public class DronePathVisualizer : MonoBehaviour
             return;
         }
 
+        if (!showPlannedPath)
+        {
+            plannedPathRenderer.positionCount = 0;
+            return;
+        }
+
         if (droneData == null || droneData.plannedPath == null || droneData.plannedPath.Count == 0)
         {
             plannedPathRenderer.positionCount = 0;
@@ -153,6 +171,12 @@ public class DronePathVisualizer : MonoBehaviour
             return;
         }
 
+        if (!showTrail)
+        {
+            trailRenderer.positionCount = 0;
+            return;
+        }
+
         Vector3 currentPosition = droneController.transform.position + Vector3.up * 0.06f;
         if (trailPoints.Count == 0)
         {
@@ -171,6 +195,27 @@ public class DronePathVisualizer : MonoBehaviour
         for (int i = 0; i < trailPoints.Count; i++)
         {
             trailRenderer.SetPosition(i, trailPoints[i]);
+        }
+    }
+
+    private void ApplyVisibility()
+    {
+        if (plannedPathRenderer != null)
+        {
+            plannedPathRenderer.enabled = showPlannedPath;
+            if (!showPlannedPath)
+            {
+                plannedPathRenderer.positionCount = 0;
+            }
+        }
+
+        if (trailRenderer != null)
+        {
+            trailRenderer.enabled = showTrail;
+            if (!showTrail)
+            {
+                trailRenderer.positionCount = 0;
+            }
         }
     }
 }
