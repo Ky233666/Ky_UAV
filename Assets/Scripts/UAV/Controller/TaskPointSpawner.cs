@@ -11,6 +11,22 @@ public class TaskPointSpawner : MonoBehaviour
     [Header("设置")]
     public Transform parentContainer;
 
+    [Header("安全生成")]
+    [Tooltip("生成任务点时自动避开建筑等障碍物")]
+    public bool avoidObstaclesOnSpawn = true;
+
+    [Tooltip("任务点安全检测半径")]
+    public float safetyCheckRadius = 1.25f;
+
+    [Tooltip("在原始目标点附近重新采样的最大尝试次数")]
+    public int maxSpawnAttempts = 24;
+
+    [Tooltip("当目标点无效时，围绕目标点重新采样的半径")]
+    public float relocationRadius = 8f;
+
+    [Tooltip("任务点生成时离地高度偏移")]
+    public float spawnHeightOffset = 0.25f;
+
     [Header("自动编号")]
     private int currentId = 1;
 
@@ -25,7 +41,8 @@ public class TaskPointSpawner : MonoBehaviour
             return null;
         }
 
-        GameObject go = Instantiate(taskPointPrefab, position, Quaternion.identity);
+        Vector3 finalPosition = ResolveSpawnPosition(position);
+        GameObject go = Instantiate(taskPointPrefab, finalPosition, Quaternion.identity);
 
         if (parentContainer != null)
             go.transform.SetParent(parentContainer);
@@ -40,7 +57,7 @@ public class TaskPointSpawner : MonoBehaviour
             currentId++;
         }
 
-        Debug.Log($"[TaskPointSpawner] 创建任务点: {go.name} at {position}");
+        Debug.Log($"[TaskPointSpawner] 创建任务点: {go.name} at {finalPosition}");
         return taskPoint;
     }
 
@@ -83,5 +100,71 @@ public class TaskPointSpawner : MonoBehaviour
         }
 
         Debug.Log($"[TaskPointSpawner] 已清除 {cleared} 个任务点");
+    }
+
+    private Vector3 ResolveSpawnPosition(Vector3 desiredPosition)
+    {
+        Vector3 groundedDesiredPosition = new Vector3(desiredPosition.x, GetSpawnHeight(), desiredPosition.z);
+        if (!avoidObstaclesOnSpawn)
+        {
+            return groundedDesiredPosition;
+        }
+
+        LayerMask obstacleLayer = GetObstacleLayer();
+        if (obstacleLayer.value == 0)
+        {
+            return groundedDesiredPosition;
+        }
+
+        if (IsPositionSafe(groundedDesiredPosition, obstacleLayer))
+        {
+            return groundedDesiredPosition;
+        }
+
+        for (int i = 0; i < maxSpawnAttempts; i++)
+        {
+            Vector2 offset = Random.insideUnitCircle * relocationRadius;
+            Vector3 candidate = new Vector3(
+                desiredPosition.x + offset.x,
+                GetSpawnHeight(),
+                desiredPosition.z + offset.y
+            );
+
+            if (IsPositionSafe(candidate, obstacleLayer))
+            {
+                Debug.Log($"[TaskPointSpawner] 原始任务点位置位于障碍区域，已重定位到安全位置: {candidate}");
+                return candidate;
+            }
+        }
+
+        Debug.LogWarning("[TaskPointSpawner] 未找到安全任务点位置，本次创建将保留原始位置，请检查场景障碍物布局");
+        return groundedDesiredPosition;
+    }
+
+    private LayerMask GetObstacleLayer()
+    {
+        if (DroneManager.Instance != null && DroneManager.Instance.planningObstacleLayer.value != 0)
+        {
+            return DroneManager.Instance.planningObstacleLayer;
+        }
+
+        int buildingLayer = LayerMask.NameToLayer("Building");
+        if (buildingLayer < 0)
+        {
+            return 0;
+        }
+
+        return 1 << buildingLayer;
+    }
+
+    private bool IsPositionSafe(Vector3 position, LayerMask obstacleLayer)
+    {
+        Vector3 checkCenter = new Vector3(position.x, position.y + safetyCheckRadius, position.z);
+        return !Physics.CheckSphere(checkCenter, safetyCheckRadius, obstacleLayer, QueryTriggerInteraction.Ignore);
+    }
+
+    private float GetSpawnHeight()
+    {
+        return spawnHeightOffset;
     }
 }

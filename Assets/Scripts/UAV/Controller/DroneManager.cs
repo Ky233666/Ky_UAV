@@ -26,6 +26,9 @@ public class DroneManager : MonoBehaviour
     [Tooltip("排列方向")]
     public Vector3 spawnDirection = new Vector3(1, 0, 0);
 
+    [Tooltip("优先使用场景中的 SpawnPoint 作为起飞位置；不足时再回退到 spawnOrigin 阵列")]
+    public bool useSceneSpawnPoints = true;
+
     [Header("管理")]
     [Tooltip("所有无人机列表")]
     public List<DroneController> drones = new List<DroneController>();
@@ -57,6 +60,25 @@ public class DroneManager : MonoBehaviour
     [Tooltip("是否允许对角线移动")]
     public bool allowDiagonalPlanning = true;
 
+    [Header("障碍自动配置")]
+    [Tooltip("运行时自动把场景中的建筑区域纳入路径规划障碍物")]
+    public bool autoConfigurePlanningObstacles = true;
+
+    [Tooltip("场景中的障碍物根节点；为空时会自动查找名为 Buildings 的对象")]
+    public Transform obstacleRoot;
+
+    [Tooltip("是否把障碍物根节点下的所有子物体递归设置到 Building 层")]
+    public bool assignBuildingLayerRecursively = true;
+
+    [Tooltip("如果建筑模型本身没有碰撞体，则自动为每个建筑根节点生成一个包围盒碰撞体")]
+    public bool generateObstacleProxyColliders = true;
+
+    [Tooltip("自动生成障碍代理碰撞体时附加的尺寸余量")]
+    public Vector3 obstacleColliderPadding = new Vector3(0.8f, 0.5f, 0.8f);
+
+    [Tooltip("自动生成障碍代理碰撞体时的最小尺寸")]
+    public Vector3 minimumObstacleColliderSize = new Vector3(2f, 2f, 2f);
+
     void Awake()
     {
         // 单例
@@ -70,6 +92,13 @@ public class DroneManager : MonoBehaviour
 
     void Start()
     {
+        EnsurePlanningObstacleLayerConfigured();
+
+        if (autoConfigurePlanningObstacles)
+        {
+            ConfigurePlanningObstacles();
+        }
+
         // 自动生成无人机（如果需要）
         if (drones.Count == 0 && dronePrefab != null)
         {
@@ -90,11 +119,11 @@ public class DroneManager : MonoBehaviour
 
         // 清除现有无人机
         ClearAllDrones();
+        List<Vector3> spawnPositions = BuildSpawnPositions(count);
 
         for (int i = 0; i < count; i++)
         {
-            // 计算位置
-            Vector3 position = spawnOrigin + spawnDirection * (i * spawnSpacing);
+            Vector3 position = spawnPositions[i];
 
             // 实例化
             GameObject go = Instantiate(dronePrefab.gameObject, position, Quaternion.identity);
@@ -425,5 +454,199 @@ public class DroneManager : MonoBehaviour
         }
 
         cameraManager.RefreshManagedDrones();
+    }
+
+    private void EnsurePlanningObstacleLayerConfigured()
+    {
+        if (planningObstacleLayer.value != 0)
+        {
+            return;
+        }
+
+        int buildingLayer = LayerMask.NameToLayer("Building");
+        if (buildingLayer < 0)
+        {
+            Debug.LogWarning("[DroneManager] 未找到 Building 层，A* 障碍物检测仍需要手动配置");
+            return;
+        }
+
+        planningObstacleLayer = 1 << buildingLayer;
+        Debug.Log("[DroneManager] 已自动将路径规划障碍层设置为 Building");
+    }
+
+    private void ConfigurePlanningObstacles()
+    {
+        Transform root = ResolveObstacleRoot();
+        if (root == null)
+        {
+            Debug.LogWarning("[DroneManager] 未找到障碍物根节点，当前不会自动配置建筑障碍物");
+            return;
+        }
+
+        int buildingLayer = LayerMask.NameToLayer("Building");
+        int configuredCount = 0;
+
+        foreach (Transform child in root)
+        {
+            if (child == null)
+            {
+                continue;
+            }
+
+            if (assignBuildingLayerRecursively && buildingLayer >= 0)
+            {
+                ApplyLayerRecursively(child.gameObject, buildingLayer);
+            }
+
+            if (generateObstacleProxyColliders)
+            {
+                if (EnsureObstacleProxyCollider(child))
+                {
+                    configuredCount++;
+                }
+            }
+        }
+
+        Debug.Log($"[DroneManager] 已完成障碍物自动配置，根节点：{root.name}，代理碰撞体数量：{configuredCount}");
+    }
+
+    private Transform ResolveObstacleRoot()
+    {
+        if (obstacleRoot != null)
+        {
+            return obstacleRoot;
+        }
+
+        GameObject root = GameObject.Find("Buildings");
+        if (root != null)
+        {
+            obstacleRoot = root.transform;
+        }
+
+        return obstacleRoot;
+    }
+
+    private void ApplyLayerRecursively(GameObject root, int layer)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        root.layer = layer;
+        foreach (Transform child in root.transform)
+        {
+            if (child != null)
+            {
+                ApplyLayerRecursively(child.gameObject, layer);
+            }
+        }
+    }
+
+    private bool EnsureObstacleProxyCollider(Transform obstacleTransform)
+    {
+        if (obstacleTransform == null)
+        {
+            return false;
+        }
+
+        Collider[] childColliders = obstacleTransform.GetComponentsInChildren<Collider>(true);
+        if (childColliders.Any(collider => collider != null && collider.transform != obstacleTransform))
+        {
+            return false;
+        }
+
+        Renderer[] renderers = obstacleTransform.GetComponentsInChildren<Renderer>(true);
+        if (renderers.Length == 0)
+        {
+            return false;
+        }
+
+        Bounds worldBounds = renderers[0].bounds;
+        for (int i = 1; i < renderers.Length; i++)
+        {
+            worldBounds.Encapsulate(renderers[i].bounds);
+        }
+
+        if (worldBounds.size == Vector3.zero)
+        {
+            return false;
+        }
+
+        BoxCollider boxCollider = obstacleTransform.GetComponent<BoxCollider>();
+        if (boxCollider == null)
+        {
+            boxCollider = obstacleTransform.gameObject.AddComponent<BoxCollider>();
+        }
+
+        Bounds localBounds = CalculateLocalBounds(obstacleTransform, worldBounds);
+        boxCollider.center = localBounds.center;
+        boxCollider.size = Vector3.Max(localBounds.size + obstacleColliderPadding, minimumObstacleColliderSize);
+        boxCollider.isTrigger = false;
+        return true;
+    }
+
+    private Bounds CalculateLocalBounds(Transform target, Bounds worldBounds)
+    {
+        Vector3 extents = worldBounds.extents;
+        Vector3 center = worldBounds.center;
+        Vector3[] worldCorners =
+        {
+            center + new Vector3(-extents.x, -extents.y, -extents.z),
+            center + new Vector3(-extents.x, -extents.y, extents.z),
+            center + new Vector3(-extents.x, extents.y, -extents.z),
+            center + new Vector3(-extents.x, extents.y, extents.z),
+            center + new Vector3(extents.x, -extents.y, -extents.z),
+            center + new Vector3(extents.x, -extents.y, extents.z),
+            center + new Vector3(extents.x, extents.y, -extents.z),
+            center + new Vector3(extents.x, extents.y, extents.z)
+        };
+
+        Vector3 localCorner = target.InverseTransformPoint(worldCorners[0]);
+        Bounds localBounds = new Bounds(localCorner, Vector3.zero);
+        for (int i = 1; i < worldCorners.Length; i++)
+        {
+            localBounds.Encapsulate(target.InverseTransformPoint(worldCorners[i]));
+        }
+
+        return localBounds;
+    }
+
+    private List<Vector3> BuildSpawnPositions(int count)
+    {
+        List<Vector3> positions = new List<Vector3>(count);
+
+        if (useSceneSpawnPoints)
+        {
+            List<Transform> sceneSpawnPoints = GetSceneSpawnPoints();
+            for (int i = 0; i < sceneSpawnPoints.Count && positions.Count < count; i++)
+            {
+                positions.Add(sceneSpawnPoints[i].position);
+            }
+        }
+
+        while (positions.Count < count)
+        {
+            positions.Add(spawnOrigin + spawnDirection * (positions.Count * spawnSpacing));
+        }
+
+        return positions;
+    }
+
+    private List<Transform> GetSceneSpawnPoints()
+    {
+        List<Transform> spawnPoints = new List<Transform>();
+        GameObject[] taggedObjects = GameObject.FindGameObjectsWithTag("SpawnPoint");
+
+        foreach (GameObject taggedObject in taggedObjects)
+        {
+            if (taggedObject != null)
+            {
+                spawnPoints.Add(taggedObject.transform);
+            }
+        }
+
+        spawnPoints.Sort((left, right) => string.CompareOrdinal(left.name, right.name));
+        return spawnPoints;
     }
 }
