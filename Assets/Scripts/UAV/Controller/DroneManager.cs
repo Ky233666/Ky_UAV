@@ -37,6 +37,26 @@ public class DroneManager : MonoBehaviour
     [Tooltip("当前使用的任务调度算法")]
     public SchedulerAlgorithmType schedulerAlgorithm = SchedulerAlgorithmType.EvenSplit;
 
+    [Header("路径规划算法")]
+    [Tooltip("当前使用的路径规划算法")]
+    public PathPlannerType pathPlannerType = PathPlannerType.StraightLine;
+
+    [Header("路径规划配置")]
+    [Tooltip("路径规划网格尺寸")]
+    public float planningGridCellSize = 2f;
+
+    [Tooltip("路径规划区域最小边界")]
+    public Vector3 planningWorldMin = new Vector3(-20f, 0f, -20f);
+
+    [Tooltip("路径规划区域最大边界")]
+    public Vector3 planningWorldMax = new Vector3(80f, 10f, 80f);
+
+    [Tooltip("静态障碍物层，用于 A* 栅格阻挡检测")]
+    public LayerMask planningObstacleLayer;
+
+    [Tooltip("是否允许对角线移动")]
+    public bool allowDiagonalPlanning = true;
+
     void Awake()
     {
         // 单例
@@ -110,10 +130,18 @@ public class DroneManager : MonoBehaviour
                 sm.droneData = data;
                 drone.stateMachine = sm;
 
+                DronePathVisualizer pathVisualizer = go.GetComponent<DronePathVisualizer>();
+                if (pathVisualizer == null)
+                    pathVisualizer = go.AddComponent<DronePathVisualizer>();
+
+                pathVisualizer.droneController = drone;
+                pathVisualizer.droneData = data;
+
                 Debug.Log($"[DroneManager] 无人机 {drone.droneId} 状态机已创建");
             }
         }
 
+        BindCamerasToManagedDrones();
         Debug.Log($"[DroneManager] 已生成 {count} 架无人机");
     }
 
@@ -166,6 +194,12 @@ public class DroneManager : MonoBehaviour
             if (drone != null)
             {
                 drone.Reset();
+
+                DronePathVisualizer pathVisualizer = drone.GetComponent<DronePathVisualizer>();
+                if (pathVisualizer != null)
+                {
+                    pathVisualizer.ResetVisuals();
+                }
             }
         }
 
@@ -256,6 +290,79 @@ public class DroneManager : MonoBehaviour
     }
 
     /// <summary>
+    /// 创建当前配置对应的路径规划算法实例。
+    /// 当前先接入直线路径，为后续 A* 预留入口。
+    /// </summary>
+    public IPathPlanner CreatePathPlanner()
+    {
+        switch (pathPlannerType)
+        {
+            case PathPlannerType.AStar:
+                return new AStarPlanner();
+
+            case PathPlannerType.StraightLine:
+            default:
+                return new StraightLinePlanner();
+        }
+    }
+
+    /// <summary>
+    /// 为指定无人机规划到当前任务点的路径，并把结果记录到 DroneData。
+    /// </summary>
+    public PathPlanningResult PlanPathForTask(int droneId, TaskPoint taskPoint)
+    {
+        PathPlanningResult failedResult = new PathPlanningResult
+        {
+            success = false,
+            plannerName = pathPlannerType.ToString(),
+            message = "路径规划未执行"
+        };
+
+        DroneController drone = GetDrone(droneId);
+        DroneData data = GetDroneData(droneId);
+        if (drone == null || data == null)
+        {
+            failedResult.message = $"未找到无人机 {droneId} 的控制器或数据";
+            return failedResult;
+        }
+
+        if (taskPoint == null)
+        {
+            failedResult.message = "任务点为空";
+            return failedResult;
+        }
+
+        IPathPlanner planner = CreatePathPlanner();
+        PathPlanningRequest request = new PathPlanningRequest
+        {
+            droneId = droneId,
+            startPosition = drone.transform.position,
+            targetPosition = taskPoint.transform.position,
+            gridCellSize = planningGridCellSize,
+            worldMin = planningWorldMin,
+            worldMax = planningWorldMax,
+            obstacleLayer = planningObstacleLayer,
+            allowDiagonal = allowDiagonalPlanning
+        };
+
+        PathPlanningResult result = planner.PlanPath(request);
+        data.currentPlannerName = result.plannerName;
+        data.plannedPath = result.waypoints ?? new List<Vector3>();
+        data.currentWaypointIndex = 0;
+
+        if (result.success)
+        {
+            Debug.Log($"[DroneManager] 无人机 {droneId} 已使用 {result.plannerName} 规划路径，waypoints: {data.plannedPath.Count}");
+        }
+        else
+        {
+            Debug.LogWarning($"[DroneManager] 无人机 {droneId} 路径规划失败: {result.message}");
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// 将场景中无人机当前位置同步到 DroneData，供调度算法估算距离。
     /// </summary>
     private void SyncDronePositionsToData()
@@ -307,5 +414,16 @@ public class DroneManager : MonoBehaviour
         }
 
         return sb.ToString();
+    }
+
+    private void BindCamerasToManagedDrones()
+    {
+        CameraManager cameraManager = FindObjectOfType<CameraManager>();
+        if (cameraManager == null)
+        {
+            return;
+        }
+
+        cameraManager.RefreshManagedDrones();
     }
 }

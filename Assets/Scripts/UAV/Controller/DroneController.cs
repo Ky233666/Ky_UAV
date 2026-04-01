@@ -35,6 +35,8 @@ public class DroneController : MonoBehaviour
     private Vector3 initialPosition;
     private Quaternion initialRotation;
     private Rigidbody cachedRigidbody;
+    private bool hasVirtualTargetPosition;
+    private Vector3 virtualTargetPosition;
 
     void Awake()
     {
@@ -77,6 +79,7 @@ public class DroneController : MonoBehaviour
     public void SetTarget(Transform newTarget)
     {
         targetPoint = newTarget;
+        hasVirtualTargetPosition = false;
         hasArrived = false;
     }
 
@@ -85,9 +88,16 @@ public class DroneController : MonoBehaviour
     /// </summary>
     public void SetTargetPosition(Vector3 position)
     {
-        GameObject tempTarget = new GameObject("TempTarget");
-        tempTarget.transform.position = position;
-        SetTarget(tempTarget.transform);
+        targetPoint = null;
+        virtualTargetPosition = position;
+        hasVirtualTargetPosition = true;
+        hasArrived = false;
+    }
+
+    public void ClearTarget()
+    {
+        targetPoint = null;
+        hasVirtualTargetPosition = false;
     }
 
     /// <summary>
@@ -98,6 +108,8 @@ public class DroneController : MonoBehaviour
         StopPhysicsMotion();
         transform.position = initialPosition;
         transform.rotation = initialRotation;
+        targetPoint = null;
+        hasVirtualTargetPosition = false;
         hasArrived = false;
 
         Debug.Log($"[{gameObject.name}] 已重置到初始位置");
@@ -135,11 +147,11 @@ public class DroneController : MonoBehaviour
         // === 以下为无状态机时的兼容逻辑 ===
 
         // 没有目标点或已到达则不移动
-        if (targetPoint == null || hasArrived)
+        if (!TryGetCurrentTargetPosition(out Vector3 targetPosition) || hasArrived)
             return;
 
         // 计算方向和距离
-        Vector3 direction = targetPoint.position - transform.position;
+        Vector3 direction = targetPosition - transform.position;
         float distance = direction.magnitude;
 
         // 到达判定
@@ -182,15 +194,33 @@ public class DroneController : MonoBehaviour
         cachedRigidbody.angularVelocity = Vector3.zero;
     }
 
-    void OnDrawGizmosSelected()
+    public bool TryGetCurrentTargetPosition(out Vector3 targetPosition)
     {
         if (targetPoint != null)
         {
+            targetPosition = targetPoint.position;
+            return true;
+        }
+
+        if (hasVirtualTargetPosition)
+        {
+            targetPosition = virtualTargetPosition;
+            return true;
+        }
+
+        targetPosition = Vector3.zero;
+        return false;
+    }
+
+    void OnDrawGizmosSelected()
+    {
+        if (TryGetCurrentTargetPosition(out Vector3 targetPosition))
+        {
             Gizmos.color = Color.green;
-            Gizmos.DrawLine(transform.position, targetPoint.position);
+            Gizmos.DrawLine(transform.position, targetPosition);
 
             Gizmos.color = Color.yellow;
-            Gizmos.DrawWireSphere(targetPoint.position, arriveDistance);
+            Gizmos.DrawWireSphere(targetPosition, arriveDistance);
         }
     }
 }

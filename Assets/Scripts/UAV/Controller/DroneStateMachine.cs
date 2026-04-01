@@ -139,12 +139,7 @@ public class DroneStateMachine : MonoBehaviour
                 // 从任务队列获取第一个目标并设置
                 if (droneData != null && droneData.HasPendingTasks())
                 {
-                    TaskPoint firstTask = droneData.GetCurrentTask();
-                    if (firstTask != null && droneController != null)
-                    {
-                        droneController.SetTarget(firstTask.transform);
-                        droneController.hasArrived = false;
-                    }
+                    TryPlanAndPrepareCurrentTaskPath();
                 }
                 break;
 
@@ -187,43 +182,43 @@ public class DroneStateMachine : MonoBehaviour
         if (droneController == null)
             return;
 
-        // 没有目标点则不移动
-        if (droneController.targetPoint == null)
+        if (!TryGetActiveTargetPosition(out Vector3 targetPos))
             return;
 
         // 计算方向和距离
-        Vector3 targetPos = droneController.targetPoint.position;
         Vector3 direction = targetPos - droneController.transform.position;
         float distance = direction.magnitude;
 
         // 到达判定
         if (distance <= droneController.arriveDistance)
         {
-            droneController.hasArrived = true;
-
-            // 标记任务完成
-            if (droneData != null && droneData.HasPendingTasks())
+            if (TryAdvanceToNextWaypoint())
             {
-                droneData.MoveToNextTask();
+                droneController.hasArrived = false;
+            }
+            else
+            {
+                droneController.hasArrived = true;
 
-                // 如果还有任务，继续飞向下一个
-                if (droneData.HasPendingTasks())
+                // 标记任务完成
+                if (droneData != null && droneData.HasPendingTasks())
                 {
-                    TaskPoint nextTask = droneData.GetCurrentTask();
-                    if (nextTask != null)
+                    droneData.MoveToNextTask();
+
+                    // 如果还有任务，继续飞向下一个
+                    if (droneData.HasPendingTasks())
                     {
-                        droneController.SetTarget(nextTask.transform);
-                        droneController.hasArrived = false;
+                        TryPlanAndPrepareCurrentTaskPath();
+                    }
+                    else
+                    {
+                        ChangeState(DroneState.Finished);
                     }
                 }
                 else
                 {
                     ChangeState(DroneState.Finished);
                 }
-            }
-            else
-            {
-                ChangeState(DroneState.Finished);
             }
             return;
         }
@@ -312,12 +307,15 @@ public class DroneStateMachine : MonoBehaviour
             droneData.completedTasks = 0;
             droneData.totalFlightDistance = 0f;
             droneData.waitReason = "";
+            droneData.plannedPath.Clear();
+            droneData.currentWaypointIndex = 0;
+            droneData.currentPlannerName = "";
         }
 
         if (droneController != null)
         {
             droneController.hasArrived = false;
-            droneController.targetPoint = null;
+            droneController.ClearTarget();
         }
 
         ChangeState(DroneState.Idle);
@@ -337,6 +335,69 @@ public class DroneStateMachine : MonoBehaviour
     public bool CanAcceptTask()
     {
         return currentState == DroneState.Idle || currentState == DroneState.Finished;
+    }
+
+    private void TryPlanAndPrepareCurrentTaskPath()
+    {
+        if (droneData == null || droneController == null)
+        {
+            return;
+        }
+
+        TaskPoint currentTask = droneData.GetCurrentTask();
+        if (currentTask == null)
+        {
+            return;
+        }
+
+        if (DroneManager.Instance != null)
+        {
+            PathPlanningResult pathResult = DroneManager.Instance.PlanPathForTask(droneData.droneId, currentTask);
+            if (pathResult.HasPath())
+            {
+                droneData.currentWaypointIndex = pathResult.waypoints.Count > 1 ? 1 : 0;
+                droneController.SetTargetPosition(pathResult.waypoints[droneData.currentWaypointIndex]);
+                droneController.hasArrived = false;
+                return;
+            }
+        }
+
+        droneData.plannedPath.Clear();
+        droneData.currentWaypointIndex = 0;
+        droneController.SetTarget(currentTask.transform);
+        droneController.hasArrived = false;
+    }
+
+    private bool TryGetActiveTargetPosition(out Vector3 targetPosition)
+    {
+        if (droneData != null &&
+            droneData.plannedPath != null &&
+            droneData.plannedPath.Count > 0 &&
+            droneData.currentWaypointIndex >= 0 &&
+            droneData.currentWaypointIndex < droneData.plannedPath.Count)
+        {
+            targetPosition = droneData.plannedPath[droneData.currentWaypointIndex];
+            return true;
+        }
+
+        return droneController.TryGetCurrentTargetPosition(out targetPosition);
+    }
+
+    private bool TryAdvanceToNextWaypoint()
+    {
+        if (droneData == null || droneData.plannedPath == null || droneData.plannedPath.Count == 0)
+        {
+            return false;
+        }
+
+        if (droneData.currentWaypointIndex >= droneData.plannedPath.Count - 1)
+        {
+            return false;
+        }
+
+        droneData.currentWaypointIndex++;
+        droneController.SetTargetPosition(droneData.plannedPath[droneData.currentWaypointIndex]);
+        return true;
     }
 
     #endregion

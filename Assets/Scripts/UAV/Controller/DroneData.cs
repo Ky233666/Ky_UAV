@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -41,6 +42,22 @@ public class DroneData
     /// 最近一次已知位置，用于调度算法估算距离。
     /// </summary>
     public UnityEngine.Vector3 lastKnownPosition = UnityEngine.Vector3.zero;
+
+    /// <summary>
+    /// 当前任务最近一次规划得到的路径点列表。
+    /// 后续接入 A* 后，将由状态机按该列表逐点执行。
+    /// </summary>
+    public List<Vector3> plannedPath = new List<Vector3>();
+
+    /// <summary>
+    /// 当前路径执行到的 waypoint 索引。
+    /// </summary>
+    public int currentWaypointIndex = 0;
+
+    /// <summary>
+    /// 最近一次使用的路径规划器名称。
+    /// </summary>
+    public string currentPlannerName = "";
 
     /// <summary>
     /// 任务队列（待分配任务点列表）
