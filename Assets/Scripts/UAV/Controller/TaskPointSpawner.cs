@@ -1,38 +1,34 @@
 using UnityEngine;
 
 /// <summary>
-/// 任务点生成器：运行时从代码/UI 创建任务点
+/// Spawns task points during runtime.
 /// </summary>
 public class TaskPointSpawner : MonoBehaviour
 {
-    [Header("任务点 Prefab")]
+    [Header("Task Point Prefab")]
     public GameObject taskPointPrefab;
 
-    [Header("设置")]
+    [Header("Hierarchy")]
     public Transform parentContainer;
 
-    [Header("安全生成")]
-    [Tooltip("生成任务点时自动避开建筑等障碍物")]
+    [Header("Safe Spawn")]
+    [Tooltip("Automatically avoid buildings and other obstacles when spawning task points.")]
     public bool avoidObstaclesOnSpawn = true;
 
-    [Tooltip("任务点安全检测半径")]
+    [Tooltip("Safety check radius for each task point.")]
     public float safetyCheckRadius = 1.25f;
 
-    [Tooltip("在原始目标点附近重新采样的最大尝试次数")]
+    [Tooltip("Maximum retry count when the original location is blocked.")]
     public int maxSpawnAttempts = 24;
 
-    [Tooltip("当目标点无效时，围绕目标点重新采样的半径")]
+    [Tooltip("Retry radius around the blocked target point.")]
     public float relocationRadius = 8f;
 
-    [Tooltip("任务点生成时离地高度偏移")]
+    [Tooltip("Height offset above ground for spawned task points.")]
     public float spawnHeightOffset = 0.25f;
 
-    [Header("自动编号")]
     private int currentId = 1;
 
-    /// <summary>
-    /// 在指定位置创建任务点
-    /// </summary>
     public TaskPoint SpawnTaskPoint(Vector3 position)
     {
         if (taskPointPrefab == null)
@@ -45,11 +41,13 @@ public class TaskPointSpawner : MonoBehaviour
         GameObject go = Instantiate(taskPointPrefab, finalPosition, Quaternion.identity);
 
         if (parentContainer != null)
+        {
             go.transform.SetParent(parentContainer);
+        }
 
         go.name = $"TaskPoint_{currentId}";
 
-        var taskPoint = go.GetComponent<TaskPoint>();
+        TaskPoint taskPoint = go.GetComponent<TaskPoint>();
         if (taskPoint != null)
         {
             taskPoint.taskId = currentId;
@@ -61,24 +59,17 @@ public class TaskPointSpawner : MonoBehaviour
         return taskPoint;
     }
 
-    /// <summary>
-    /// 创建一行任务点（测试用）
-    /// </summary>
     public void SpawnTaskPoints(int count, float spacing)
     {
         for (int i = 0; i < count; i++)
         {
-            Vector3 position = transform.position + new Vector3(i * spacing, 0, 0);
+            Vector3 position = transform.position + new Vector3(i * spacing, 0f, 0f);
             SpawnTaskPoint(position);
         }
     }
 
-    /// <summary>
-    /// 清除所有任务点
-    /// </summary>
     public void ClearAll()
     {
-        // 通过 parentContainer 清除
         if (parentContainer != null)
         {
             foreach (Transform child in parentContainer)
@@ -87,24 +78,41 @@ public class TaskPointSpawner : MonoBehaviour
             }
         }
 
-        // 清除场景中所有 TaskPoint 实例，但不要销毁 Prefab 引用本身
-        var allTaskPoints = FindObjectsOfType<TaskPoint>();
+        TaskPoint[] allTaskPoints = FindObjectsOfType<TaskPoint>();
         int cleared = 0;
-        foreach (var tp in allTaskPoints)
+        foreach (TaskPoint taskPoint in allTaskPoints)
         {
-            // 若 Prefab 槽位拖的是场景里的对象，不要销毁它，否则引用会丢失
-            if (taskPointPrefab != null && tp.gameObject == taskPointPrefab)
+            if (taskPointPrefab != null && taskPoint.gameObject == taskPointPrefab)
+            {
                 continue;
-            Destroy(tp.gameObject);
+            }
+
+            Destroy(taskPoint.gameObject);
             cleared++;
         }
 
         Debug.Log($"[TaskPointSpawner] 已清除 {cleared} 个任务点");
     }
 
+    public bool IsPlacementSafe(Vector3 position)
+    {
+        LayerMask obstacleLayer = GetObstacleLayer();
+        if (obstacleLayer.value == 0)
+        {
+            return true;
+        }
+
+        return IsPositionSafe(GetGroundedPosition(position), obstacleLayer);
+    }
+
+    public Vector3 GetGroundedPosition(Vector3 position)
+    {
+        return new Vector3(position.x, GetSpawnHeight(), position.z);
+    }
+
     private Vector3 ResolveSpawnPosition(Vector3 desiredPosition)
     {
-        Vector3 groundedDesiredPosition = new Vector3(desiredPosition.x, GetSpawnHeight(), desiredPosition.z);
+        Vector3 groundedDesiredPosition = GetGroundedPosition(desiredPosition);
         if (!avoidObstaclesOnSpawn)
         {
             return groundedDesiredPosition;
@@ -127,8 +135,7 @@ public class TaskPointSpawner : MonoBehaviour
             Vector3 candidate = new Vector3(
                 desiredPosition.x + offset.x,
                 GetSpawnHeight(),
-                desiredPosition.z + offset.y
-            );
+                desiredPosition.z + offset.y);
 
             if (IsPositionSafe(candidate, obstacleLayer))
             {
