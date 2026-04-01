@@ -38,6 +38,11 @@ public class DroneData
     public float speed;
 
     /// <summary>
+    /// 最近一次已知位置，用于调度算法估算距离。
+    /// </summary>
+    public UnityEngine.Vector3 lastKnownPosition = UnityEngine.Vector3.zero;
+
+    /// <summary>
     /// 任务队列（待分配任务点列表）
     /// </summary>
     public TaskPoint[] taskQueue;

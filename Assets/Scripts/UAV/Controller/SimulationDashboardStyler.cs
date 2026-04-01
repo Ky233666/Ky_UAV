@@ -1,6 +1,9 @@
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 [ExecuteAlways]
 [DisallowMultipleComponent]
@@ -21,6 +24,7 @@ public class SimulationDashboardStyler : MonoBehaviour
     private const string TaskCardName = "__TaskCard";
 
     private bool isApplying;
+    private bool applyQueued;
 
     private static readonly Color TopScrimColor = new Color(0.02f, 0.07f, 0.12f, 0.28f);
     private static readonly Color BottomScrimColor = new Color(0.01f, 0.04f, 0.08f, 0.42f);
@@ -34,18 +38,68 @@ public class SimulationDashboardStyler : MonoBehaviour
 
     private void OnEnable()
     {
-        ApplyTheme();
+        RequestApplyTheme();
+    }
+
+    private void OnDisable()
+    {
+#if UNITY_EDITOR
+        EditorApplication.delayCall -= HandleDelayedApplyTheme;
+#endif
+        applyQueued = false;
     }
 
     private void OnValidate()
     {
-        ApplyTheme();
+        RequestApplyTheme();
     }
 
     private void OnTransformChildrenChanged()
     {
+        RequestApplyTheme();
+    }
+
+    private void RequestApplyTheme()
+    {
+        if (!isActiveAndEnabled)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            ApplyTheme();
+            return;
+        }
+
+#if UNITY_EDITOR
+        if (applyQueued)
+        {
+            return;
+        }
+
+        applyQueued = true;
+        EditorApplication.delayCall -= HandleDelayedApplyTheme;
+        EditorApplication.delayCall += HandleDelayedApplyTheme;
+#else
+        ApplyTheme();
+#endif
+    }
+
+#if UNITY_EDITOR
+    private void HandleDelayedApplyTheme()
+    {
+        EditorApplication.delayCall -= HandleDelayedApplyTheme;
+        applyQueued = false;
+
+        if (this == null || !isActiveAndEnabled)
+        {
+            return;
+        }
+
         ApplyTheme();
     }
+#endif
 
     private void ApplyTheme()
     {
@@ -54,6 +108,7 @@ public class SimulationDashboardStyler : MonoBehaviour
             return;
         }
 
+        applyQueued = false;
         isApplying = true;
 
         try

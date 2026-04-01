@@ -34,19 +34,15 @@ public class DroneController : MonoBehaviour
     // 记录初始位置
     private Vector3 initialPosition;
     private Quaternion initialRotation;
+    private Rigidbody cachedRigidbody;
 
     void Awake()
     {
         initialPosition = transform.position;
         initialRotation = transform.rotation;
 
-        // 若有 Rigidbody，冻结旋转，避免物理导致翻滚
-        var rb = GetComponent<Rigidbody>();
-        if (rb != null)
-        {
-            rb.freezeRotation = true;
-            rb.useGravity = false;
-        }
+        cachedRigidbody = GetComponent<Rigidbody>();
+        ConfigurePhysicsBody();
 
         // 尝试获取状态机
         if (stateMachine == null)
@@ -99,6 +95,7 @@ public class DroneController : MonoBehaviour
     /// </summary>
     public void ResetToInitial()
     {
+        StopPhysicsMotion();
         transform.position = initialPosition;
         transform.rotation = initialRotation;
         hasArrived = false;
@@ -158,6 +155,31 @@ public class DroneController : MonoBehaviour
 
         // 只移动位置，不旋转（避免翻滚）
         transform.position += direction * speed * Time.deltaTime;
+    }
+
+    private void ConfigurePhysicsBody()
+    {
+        if (cachedRigidbody == null)
+        {
+            return;
+        }
+
+        // 当前项目使用脚本直接驱动位置，不依赖物理推进。
+        cachedRigidbody.isKinematic = true;
+        cachedRigidbody.useGravity = false;
+        cachedRigidbody.freezeRotation = true;
+        StopPhysicsMotion();
+    }
+
+    private void StopPhysicsMotion()
+    {
+        if (cachedRigidbody == null)
+        {
+            return;
+        }
+
+        cachedRigidbody.velocity = Vector3.zero;
+        cachedRigidbody.angularVelocity = Vector3.zero;
     }
 
     void OnDrawGizmosSelected()

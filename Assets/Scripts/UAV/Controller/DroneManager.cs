@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Collections.Generic;
+using System.Linq;
 
 /// <summary>
 /// 无人机管理器：生成并管理多架无人机
@@ -31,6 +32,10 @@ public class DroneManager : MonoBehaviour
 
     [Tooltip("无人机数据列表")]
     public List<DroneData> droneDataList = new List<DroneData>();
+
+    [Header("调度算法")]
+    [Tooltip("当前使用的任务调度算法")]
+    public SchedulerAlgorithmType schedulerAlgorithm = SchedulerAlgorithmType.EvenSplit;
 
     void Awake()
     {
@@ -91,7 +96,8 @@ public class DroneManager : MonoBehaviour
                     droneId = drone.droneId,
                     droneName = drone.droneName,
                     speed = drone.speed,
-                    state = DroneState.Idle
+                    state = DroneState.Idle,
+                    lastKnownPosition = drone.transform.position
                 };
                 droneDataList.Add(data);
 
@@ -158,8 +164,12 @@ public class DroneManager : MonoBehaviour
         foreach (var drone in drones)
         {
             if (drone != null)
+            {
                 drone.Reset();
+            }
         }
+
+        SyncDronePositionsToData();
         Debug.Log("[DroneManager] 所有无人机已重置");
     }
 
@@ -179,44 +189,90 @@ public class DroneManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 为所有空闲无人机自动分配任务（简单轮询）
+    /// 为所有空闲无人机自动分配任务。
+    /// 当前默认仍使用均分策略，但入口已切换为调度算法接口。
     /// </summary>
-    public void AutoAssignTasks(TaskPoint[] allTasks)
+    public SchedulingResult AutoAssignTasks(TaskPoint[] allTasks)
     {
         if (allTasks == null || allTasks.Length == 0)
         {
             Debug.LogWarning("[DroneManager] 没有可分配的任务点");
-            return;
+            return new SchedulingResult
+            {
+                success = false,
+                algorithmName = schedulerAlgorithm.ToString(),
+                message = "没有可分配的任务点"
+            };
         }
 
-        int droneIndex = 0;
-        foreach (var drone in drones)
+        SyncDronePositionsToData();
+
+        SchedulingRequest request = new SchedulingRequest
         {
-            if (drone == null) continue;
+            drones = droneDataList.Where(data => data != null && data.isOnline).ToList(),
+            tasks = allTasks.Where(task => task != null).ToList(),
+            sortByPriority = false,
+            fallbackSpawnOrigin = spawnOrigin,
+            priorityWeight = 5f
+        };
+
+        ISchedulerAlgorithm scheduler = CreateSchedulerAlgorithm();
+        SchedulingResult result = scheduler.ScheduleTasks(request);
+
+        if (!result.success)
+        {
+            Debug.LogWarning($"[DroneManager] 调度失败: {result.message}");
+            return result;
+        }
+
+        foreach (DroneTaskAssignment assignment in result.assignments)
+        {
+            if (assignment == null)
+            {
+                continue;
+            }
+
+            AssignTaskQueue(assignment.droneId, assignment.assignedTasks.ToArray());
+        }
+
+        Debug.Log($"[DroneManager] 调度完成: {result.algorithmName} | {result.message}");
+        return result;
+    }
+
+    /// <summary>
+    /// 创建当前配置对应的调度算法实例。
+    /// </summary>
+    public ISchedulerAlgorithm CreateSchedulerAlgorithm()
+    {
+        switch (schedulerAlgorithm)
+        {
+            case SchedulerAlgorithmType.GreedyNearest:
+                return new GreedyNearestScheduler();
+
+            case SchedulerAlgorithmType.EvenSplit:
+            default:
+                return new EvenSplitScheduler();
+        }
+    }
+
+    /// <summary>
+    /// 将场景中无人机当前位置同步到 DroneData，供调度算法估算距离。
+    /// </summary>
+    private void SyncDronePositionsToData()
+    {
+        foreach (DroneController drone in drones)
+        {
+            if (drone == null)
+            {
+                continue;
+            }
 
             DroneData data = GetDroneData(drone.droneId);
-            if (data == null) continue;
-
-            // 每个无人机分配部分任务
-            int tasksPerDrone = Mathf.CeilToInt((float)allTasks.Length / drones.Count);
-            int startIndex = droneIndex * tasksPerDrone;
-            int endIndex = Mathf.Min(startIndex + tasksPerDrone, allTasks.Length);
-
-            if (startIndex < allTasks.Length)
+            if (data != null)
             {
-                int count = endIndex - startIndex;
-                TaskPoint[] subset = new TaskPoint[count];
-                for (int i = 0; i < count; i++)
-                {
-                    subset[i] = allTasks[startIndex + i];
-                }
-
-                AssignTaskQueue(drone.droneId, subset);
-                droneIndex++;
+                data.lastKnownPosition = drone.transform.position;
             }
         }
-
-        Debug.Log($"[DroneManager] 已为 {droneIndex} 架无人机分配任务");
     }
 
     /// <summary>

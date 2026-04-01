@@ -18,6 +18,10 @@ public class SimulationManager : MonoBehaviour
     [Tooltip("无人机管理器（多无人机）")]
     public DroneManager droneManager;
 
+    [Header("任务设置")]
+    [Tooltip("当场景中没有任务点时，自动尝试从 Resources 导入默认任务点")]
+    public bool autoImportTasksWhenMissing = true;
+
     [Header("UI 组件")]
     [Tooltip("状态文本")]
     public TMP_Text statusText;
@@ -111,6 +115,40 @@ public class SimulationManager : MonoBehaviour
         statusText.text = stateName;
     }
 
+    private TaskPoint[] GetAvailableTasks()
+    {
+        TaskPoint[] allTasks = FindObjectsOfType<TaskPoint>();
+        if (allTasks.Length > 0 || !autoImportTasksWhenMissing)
+        {
+            return allTasks;
+        }
+
+        TaskPointImporter importer = FindObjectOfType<TaskPointImporter>();
+        if (importer == null)
+        {
+            Debug.LogWarning("[SimulationManager] 未找到 TaskPointImporter，无法自动导入默认任务点");
+            return allTasks;
+        }
+
+        importer.ImportFromResources();
+        allTasks = FindObjectsOfType<TaskPoint>();
+
+        if (allTasks.Length > 0)
+        {
+            Debug.Log($"[SimulationManager] 自动导入了 {allTasks.Length} 个默认任务点");
+        }
+
+        return allTasks;
+    }
+
+    private void ShowStatusMessage(string message)
+    {
+        if (statusText != null && !string.IsNullOrWhiteSpace(message))
+        {
+            statusText.text = message;
+        }
+    }
+
     // ========== 按钮事件处理 ==========
 
     /// <summary>
@@ -121,7 +159,7 @@ public class SimulationManager : MonoBehaviour
         // 如果有 DroneManager，给无人机分配任务点
         if (droneManager != null)
         {
-            var allTasks = FindObjectsOfType<TaskPoint>();
+            var allTasks = GetAvailableTasks();
             if (allTasks.Length > 0)
             {
                 droneManager.AutoAssignTasks(allTasks);
@@ -130,6 +168,9 @@ public class SimulationManager : MonoBehaviour
             else
             {
                 Debug.LogWarning("[SimulationManager] 场景中没有任务点！");
+                ShowStatusMessage("状态：无任务点");
+                SetState(SimulationState.Idle);
+                return;
             }
         }
         // 兼容旧场景：单个无人机
@@ -144,6 +185,9 @@ public class SimulationManager : MonoBehaviour
             else
             {
                 Debug.LogWarning("[SimulationManager] 场景中没有任务点！");
+                ShowStatusMessage("状态：无任务点");
+                SetState(SimulationState.Idle);
+                return;
             }
         }
 
