@@ -67,8 +67,6 @@
 - 飞行轨迹显示开关
 - 总览/跟随/下一架无人机切换
 
-详细说明见 [Assets/Docs/RuntimeControlPanelGuide.md](Assets/Docs/RuntimeControlPanelGuide.md)。
-
 ## 主要脚本
 
 - `Assets/Scripts/UAV/Controller/SimulationManager.cs`
@@ -83,4 +81,3 @@
 ## 文档
 
 - 项目进度与路线图：`Assets/Docs/ProjectStatusAndRoadmap.md`
-- 运行时面板说明：`Assets/Docs/RuntimeControlPanelGuide.md`
