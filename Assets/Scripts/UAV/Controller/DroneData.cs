@@ -90,6 +90,11 @@ public class DroneData
     public string waitReason = "";
 
     /// <summary>
+    /// 本轮仿真进入 Waiting 的累计次数。
+    /// </summary>
+    public int waitCount = 0;
+
+    /// <summary>
     /// 获取当前目标任务点
     /// </summary>
     public TaskPoint GetCurrentTask()

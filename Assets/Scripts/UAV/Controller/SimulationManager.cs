@@ -18,6 +18,10 @@ public class SimulationManager : MonoBehaviour
     [Tooltip("无人机管理器（多无人机）")]
     public DroneManager droneManager;
 
+    [Header("结果导出")]
+    [Tooltip("实验结果导出器")]
+    public SimulationResultExporter resultExporter;
+
     [Header("任务设置")]
     [Tooltip("当场景中没有任务点时，自动尝试从 Resources 导入默认任务点")]
     public bool autoImportTasksWhenMissing = true;
@@ -38,6 +42,13 @@ public class SimulationManager : MonoBehaviour
     /// 单例实例（方便其他脚本访问）
     /// </summary>
     public static SimulationManager Instance { get; private set; }
+
+    /// <summary>
+    /// 当前这轮仿真的累计运行时长（秒），暂停时不会继续累加。
+    /// </summary>
+    public float ElapsedSimulationTime => elapsedSimulationTime;
+
+    private float elapsedSimulationTime;
 
     void Awake()
     {
@@ -66,6 +77,14 @@ public class SimulationManager : MonoBehaviour
 
         // 初始化状态
         SetState(SimulationState.Idle);
+    }
+
+    void Update()
+    {
+        if (currentState == SimulationState.Running)
+        {
+            elapsedSimulationTime += Time.deltaTime;
+        }
     }
 
     /// <summary>
@@ -158,6 +177,20 @@ public class SimulationManager : MonoBehaviour
     /// </summary>
     public void OnStartClicked()
     {
+        if (currentState == SimulationState.Running)
+        {
+            return;
+        }
+
+        if (currentState == SimulationState.Paused)
+        {
+            SetState(SimulationState.Running);
+            return;
+        }
+
+        ResetAllTaskPointsInScene();
+        elapsedSimulationTime = 0f;
+
         // 如果有 DroneManager，给无人机分配任务点
         if (droneManager != null)
         {
@@ -193,6 +226,11 @@ public class SimulationManager : MonoBehaviour
             }
         }
 
+        if (resultExporter != null)
+        {
+            resultExporter.BeginRun();
+        }
+
         SetState(SimulationState.Running);
     }
 
@@ -220,6 +258,12 @@ public class SimulationManager : MonoBehaviour
             droneController.Reset();
         }
 
+        ResetAllTaskPointsInScene();
+        elapsedSimulationTime = 0f;
+        if (resultExporter != null)
+        {
+            resultExporter.ResetRunTracking();
+        }
         SetState(SimulationState.Idle);
     }
 
@@ -231,10 +275,50 @@ public class SimulationManager : MonoBehaviour
             runtimeControlPanel = gameObject.AddComponent<SimulationRuntimeControlPanel>();
         }
 
+        DroneSpawnPointUIManager spawnPointManager = FindObjectOfType<DroneSpawnPointUIManager>();
+        if (spawnPointManager == null)
+        {
+            spawnPointManager = gameObject.AddComponent<DroneSpawnPointUIManager>();
+        }
+
         runtimeControlPanel.simulationManager = this;
         if (runtimeControlPanel.droneManager == null)
         {
             runtimeControlPanel.droneManager = droneManager;
+        }
+        runtimeControlPanel.spawnPointManager = spawnPointManager;
+
+        if (resultExporter == null)
+        {
+            resultExporter = GetComponent<SimulationResultExporter>();
+            if (resultExporter == null)
+            {
+                resultExporter = gameObject.AddComponent<SimulationResultExporter>();
+            }
+        }
+
+        resultExporter.simulationManager = this;
+        if (resultExporter.droneManager == null)
+        {
+            resultExporter.droneManager = droneManager;
+        }
+
+        spawnPointManager.simulationManager = this;
+        if (spawnPointManager.droneManager == null)
+        {
+            spawnPointManager.droneManager = droneManager;
+        }
+    }
+
+    private void ResetAllTaskPointsInScene()
+    {
+        TaskPoint[] allTasks = FindObjectsOfType<TaskPoint>();
+        foreach (TaskPoint taskPoint in allTasks)
+        {
+            if (taskPoint != null)
+            {
+                taskPoint.ResetTask();
+            }
         }
     }
 }

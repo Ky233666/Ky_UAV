@@ -36,6 +36,17 @@ public class DroneManager : MonoBehaviour
     [Tooltip("无人机数据列表")]
     public List<DroneData> droneDataList = new List<DroneData>();
 
+    [Header("机体分离")]
+    [Tooltip("是否在运行时强制维持无人机之间的最小间距，避免模型重叠。")]
+    public bool enforceDroneSeparation = true;
+
+    [Tooltip("无人机之间的最小中心距离。")]
+    public float minimumDroneSeparation = 1.6f;
+
+    [Tooltip("分离修正强度，越大越快把重叠机体推开。")]
+    [Range(0.1f, 1f)]
+    public float separationResolveFactor = 0.85f;
+
     [Header("调度算法")]
     [Tooltip("当前使用的任务调度算法")]
     public SchedulerAlgorithmType schedulerAlgorithm = SchedulerAlgorithmType.EvenSplit;
@@ -272,6 +283,45 @@ public class DroneManager : MonoBehaviour
                 data.speed = clampedSpeed;
             }
         }
+    }
+
+    /// <summary>
+    /// Applies shared runtime planning settings.
+    /// </summary>
+    public void ApplyPlanningSettings(
+        float gridCellSize,
+        bool allowDiagonal,
+        bool autoConfigureObstacles,
+        Vector3 worldMin,
+        Vector3 worldMax)
+    {
+        planningGridCellSize = Mathf.Clamp(gridCellSize, 0.5f, 10f);
+        allowDiagonalPlanning = allowDiagonal;
+        autoConfigurePlanningObstacles = autoConfigureObstacles;
+        planningWorldMin = worldMin;
+        planningWorldMax = worldMax;
+
+        EnsurePlanningObstacleLayerConfigured();
+
+        if (autoConfigurePlanningObstacles)
+        {
+            ConfigurePlanningObstacles();
+        }
+    }
+
+    void LateUpdate()
+    {
+        if (!enforceDroneSeparation || SimulationManager.Instance == null)
+        {
+            return;
+        }
+
+        if (SimulationManager.Instance.currentState != SimulationState.Running)
+        {
+            return;
+        }
+
+        ResolveDroneOverlaps();
     }
 
     /// <summary>
@@ -698,17 +748,147 @@ public class DroneManager : MonoBehaviour
     private List<Transform> GetSceneSpawnPoints()
     {
         List<Transform> spawnPoints = new List<Transform>();
+        HashSet<Transform> uniqueSpawnPoints = new HashSet<Transform>();
         GameObject[] taggedObjects = GameObject.FindGameObjectsWithTag("SpawnPoint");
 
         foreach (GameObject taggedObject in taggedObjects)
         {
-            if (taggedObject != null)
+            if (taggedObject != null && uniqueSpawnPoints.Add(taggedObject.transform))
             {
                 spawnPoints.Add(taggedObject.transform);
             }
         }
 
-        spawnPoints.Sort((left, right) => string.CompareOrdinal(left.name, right.name));
+        DroneSpawnPointMarker[] markers = FindObjectsOfType<DroneSpawnPointMarker>();
+        System.Array.Sort(markers, (left, right) =>
+        {
+            int orderCompare = left.orderIndex.CompareTo(right.orderIndex);
+            return orderCompare != 0 ? orderCompare : string.CompareOrdinal(left.name, right.name);
+        });
+
+        for (int i = 0; i < markers.Length; i++)
+        {
+            if (markers[i] != null && uniqueSpawnPoints.Add(markers[i].transform))
+            {
+                spawnPoints.Add(markers[i].transform);
+            }
+        }
+
+        spawnPoints.Sort((left, right) =>
+        {
+            DroneSpawnPointMarker leftMarker = left != null ? left.GetComponent<DroneSpawnPointMarker>() : null;
+            DroneSpawnPointMarker rightMarker = right != null ? right.GetComponent<DroneSpawnPointMarker>() : null;
+            if (leftMarker != null || rightMarker != null)
+            {
+                int leftOrder = leftMarker != null ? leftMarker.orderIndex : int.MaxValue;
+                int rightOrder = rightMarker != null ? rightMarker.orderIndex : int.MaxValue;
+                int orderCompare = leftOrder.CompareTo(rightOrder);
+                if (orderCompare != 0)
+                {
+                    return orderCompare;
+                }
+            }
+
+            string leftName = left != null ? left.name : string.Empty;
+            string rightName = right != null ? right.name : string.Empty;
+            return string.CompareOrdinal(leftName, rightName);
+        });
         return spawnPoints;
+    }
+
+    private void ResolveDroneOverlaps()
+    {
+        if (drones == null || drones.Count <= 1)
+        {
+            return;
+        }
+
+        float minDistance = Mathf.Max(0.1f, minimumDroneSeparation);
+        float minDistanceSq = minDistance * minDistance;
+
+        for (int i = 0; i < drones.Count; i++)
+        {
+            DroneController left = drones[i];
+            if (left == null)
+            {
+                continue;
+            }
+
+            for (int j = i + 1; j < drones.Count; j++)
+            {
+                DroneController right = drones[j];
+                if (right == null)
+                {
+                    continue;
+                }
+
+                Vector3 delta = right.transform.position - left.transform.position;
+                float distanceSq = delta.sqrMagnitude;
+                if (distanceSq >= minDistanceSq)
+                {
+                    continue;
+                }
+
+                float distance = Mathf.Sqrt(Mathf.Max(distanceSq, 0.000001f));
+                Vector3 separationDirection = distance > 0.0001f
+                    ? delta / distance
+                    : BuildFallbackSeparationDirection(i, j);
+                float penetration = minDistance - distance;
+                Vector3 correction = separationDirection * (penetration * separationResolveFactor);
+
+                ApplySeparation(left, right, correction);
+            }
+        }
+
+        SyncDroneDataPositionsFromTransforms();
+    }
+
+    private void ApplySeparation(DroneController left, DroneController right, Vector3 correction)
+    {
+        DroneStateMachine leftStateMachine = left != null ? left.stateMachine : null;
+        DroneStateMachine rightStateMachine = right != null ? right.stateMachine : null;
+
+        bool leftWaiting = leftStateMachine != null && leftStateMachine.currentState == DroneState.Waiting;
+        bool rightWaiting = rightStateMachine != null && rightStateMachine.currentState == DroneState.Waiting;
+
+        if (leftWaiting && !rightWaiting)
+        {
+            left.transform.position -= correction;
+            return;
+        }
+
+        if (!leftWaiting && rightWaiting)
+        {
+            right.transform.position += correction;
+            return;
+        }
+
+        Vector3 halfCorrection = correction * 0.5f;
+        left.transform.position -= halfCorrection;
+        right.transform.position += halfCorrection;
+    }
+
+    private Vector3 BuildFallbackSeparationDirection(int leftIndex, int rightIndex)
+    {
+        float angle = (leftIndex * 31f + rightIndex * 17f) * Mathf.Deg2Rad;
+        Vector3 direction = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+        return direction.sqrMagnitude <= 0.0001f ? Vector3.right : direction.normalized;
+    }
+
+    private void SyncDroneDataPositionsFromTransforms()
+    {
+        foreach (DroneController drone in drones)
+        {
+            if (drone == null)
+            {
+                continue;
+            }
+
+            DroneData data = GetDroneData(drone.droneId);
+            if (data != null)
+            {
+                data.lastKnownPosition = drone.transform.position;
+            }
+        }
     }
 }

@@ -202,6 +202,16 @@ public class CameraManager : MonoBehaviour
         UpdateCameraState();
     }
 
+    public void SetFollowOffset(Vector3 offset)
+    {
+        followOffset = offset;
+
+        if (!isOverview)
+        {
+            UpdateFollowCamera();
+        }
+    }
+
     private void EnsureFollowTarget()
     {
         if (managedDrones.Count == 0 || HasInvalidManagedDrones())

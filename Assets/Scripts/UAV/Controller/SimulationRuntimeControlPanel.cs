@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Text;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -10,6 +11,8 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     public SimulationManager simulationManager;
     public DroneManager droneManager;
     public CameraManager cameraManager;
+    public SimulationResultExporter resultExporter;
+    public DroneSpawnPointUIManager spawnPointManager;
 
     [Header("Panel Layout")]
     public Vector2 expandedSize = new Vector2(356f, 460f);
@@ -23,9 +26,23 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     private const float MinDroneSpeed = 1f;
     private const float MaxDroneSpeed = 20f;
     private const float DroneSpeedStep = 0.5f;
+    private const float MinPlanningGridCellSize = 0.5f;
+    private const float MaxPlanningGridCellSize = 8f;
+    private const float PlanningGridCellSizeStep = 0.5f;
+    private const float MinPlanningBoundary = -200f;
+    private const float MaxPlanningBoundary = 200f;
+    private const float PlanningBoundaryStep = 2f;
     private const float MinTimeScale = 0.25f;
     private const float MaxTimeScale = 3f;
     private const float TimeScaleStep = 0.25f;
+    private const float MinFollowHeight = 2f;
+    private const float MaxFollowHeight = 12f;
+    private const float FollowHeightStep = 0.5f;
+    private const float MinFollowDistance = 4f;
+    private const float MaxFollowDistance = 20f;
+    private const float FollowDistanceStep = 1f;
+    private const float StatsCardMinHeight = 168f;
+    private const float StatsCardVerticalPadding = 18f;
 
     private static readonly Color PanelColor = new Color(0.03f, 0.09f, 0.15f, 0.94f);
     private static readonly Color SectionColor = new Color(0.06f, 0.15f, 0.22f, 0.92f);
@@ -41,17 +58,29 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     private RectTransform panelRoot;
     private RectTransform bodyRoot;
     private RectTransform footerRoot;
+    private RectTransform scrollContentRoot;
     private TMP_FontAsset runtimeFont;
     private TMP_Text schedulerValueText;
     private TMP_Text plannerValueText;
     private TMP_Text droneCountValueText;
     private TMP_Text droneSpeedValueText;
     private TMP_Text timeScaleValueText;
+    private TMP_Text planningGridValueText;
+    private TMP_Text planningMinXValueText;
+    private TMP_Text planningMaxXValueText;
+    private TMP_Text planningMinZValueText;
+    private TMP_Text planningMaxZValueText;
+    private TMP_Text followHeightValueText;
+    private TMP_Text followDistanceValueText;
     private TMP_Text summaryText;
+    private TMP_Text statsText;
     private TMP_Text footerText;
     private TMP_Text expandButtonText;
+    private LayoutElement statsCardLayoutElement;
     private Button plannedPathToggleButton;
     private Button trailToggleButton;
+    private Button diagonalPlanningToggleButton;
+    private Button obstacleAutoConfigToggleButton;
     private bool isExpanded;
     private float nextSummaryRefreshTime;
 
@@ -62,8 +91,17 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     private int configuredDroneCount = 4;
     private float configuredDroneSpeed = 5f;
     private float configuredTimeScale = 1f;
+    private float configuredPlanningGridCellSize = 2f;
+    private float configuredPlanningMinX = -20f;
+    private float configuredPlanningMaxX = 80f;
+    private float configuredPlanningMinZ = -20f;
+    private float configuredPlanningMaxZ = 80f;
+    private float configuredFollowHeight = 5f;
+    private float configuredFollowDistance = 10f;
     private bool showPlannedPath = true;
     private bool showTrail = true;
+    private bool configuredAllowDiagonalPlanning = true;
+    private bool configuredAutoConfigureObstacles = true;
     private string transientMessage = "面板已就绪";
 
     private IEnumerator Start()
@@ -122,6 +160,20 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         if (cameraManager == null)
         {
             cameraManager = FindObjectOfType<CameraManager>();
+        }
+
+        if (resultExporter == null)
+        {
+            resultExporter = simulationManager != null ? simulationManager.resultExporter : null;
+            if (resultExporter == null)
+            {
+                resultExporter = FindObjectOfType<SimulationResultExporter>();
+            }
+        }
+
+        if (spawnPointManager == null)
+        {
+            spawnPointManager = FindObjectOfType<DroneSpawnPointUIManager>();
         }
 
         if (runtimeFont == null)
@@ -263,13 +315,14 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         content.pivot = new Vector2(0.5f, 1f);
         content.anchoredPosition = Vector2.zero;
         content.sizeDelta = new Vector2(0f, 0f);
+        scrollContentRoot = content;
 
         VerticalLayoutGroup layout = content.gameObject.AddComponent<VerticalLayoutGroup>();
         layout.spacing = 6f;
         layout.padding = new RectOffset(0, 0, 0, 0);
         layout.childAlignment = TextAnchor.UpperCenter;
         layout.childControlWidth = true;
-        layout.childControlHeight = false;
+        layout.childControlHeight = true;
         layout.childForceExpandWidth = true;
         layout.childForceExpandHeight = false;
 
@@ -323,9 +376,39 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         scrollRect.verticalScrollbar = scrollbar;
         scrollRect.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHideAndExpandViewport;
 
+        CreateSectionLabel(content, "统计");
+        CreateInfoCard(content, "Stats", out statsText, out statsCardLayoutElement, StatsCardMinHeight);
+
+        CreateSectionLabel(content, "结果");
+        CreateButtonStripRow(content, "导出", new[]
+        {
+            new ButtonAction("导出CSV", PrimaryButtonColor, ExportCurrentResultToCsv, 72f)
+        });
+
+        CreateSectionLabel(content, "起飞点");
+        CreateButtonStripRow(content, "编辑", new[]
+        {
+            new ButtonAction("新增", PrimaryButtonColor, ToggleSpawnPointPlacement, 48f),
+            new ButtonAction("移动", new Color(0.14f, 0.50f, 0.78f, 0.98f), ToggleSpawnPointMove, 48f),
+            new ButtonAction("删除", new Color(0.78f, 0.48f, 0.14f, 0.98f), ToggleSpawnPointDeletion, 48f)
+        });
+        CreateButtonStripRow(content, "操作", new[]
+        {
+            new ButtonAction("清空", SecondaryButtonColor, ClearSpawnPoints, 56f)
+        });
+
         CreateSectionLabel(content, "算法");
         CreateStepperRow(content, "调度", out schedulerValueText, OnPreviousSchedulerClicked, OnNextSchedulerClicked);
         CreateStepperRow(content, "路径", out plannerValueText, OnPreviousPlannerClicked, OnNextPlannerClicked);
+
+        CreateSectionLabel(content, "规划");
+        CreateStepperRow(content, "网格", out planningGridValueText, OnDecreasePlanningGridClicked, OnIncreasePlanningGridClicked);
+        CreateStepperRow(content, "X最小", out planningMinXValueText, OnDecreasePlanningMinXClicked, OnIncreasePlanningMinXClicked);
+        CreateStepperRow(content, "X最大", out planningMaxXValueText, OnDecreasePlanningMaxXClicked, OnIncreasePlanningMaxXClicked);
+        CreateStepperRow(content, "Z最小", out planningMinZValueText, OnDecreasePlanningMinZClicked, OnIncreasePlanningMinZClicked);
+        CreateStepperRow(content, "Z最大", out planningMaxZValueText, OnDecreasePlanningMaxZClicked, OnIncreasePlanningMaxZClicked);
+        CreateToggleRow(content, "对角", out diagonalPlanningToggleButton, ToggleDiagonalPlanning);
+        CreateToggleRow(content, "障碍", out obstacleAutoConfigToggleButton, ToggleObstacleAutoConfiguration);
 
         CreateSectionLabel(content, "机群");
         CreateStepperRow(content, "数量", out droneCountValueText, OnDecreaseDroneCountClicked, OnIncreaseDroneCountClicked);
@@ -348,6 +431,8 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
             new ButtonAction("跟随", PrimaryButtonColor, SwitchToFollowCamera, 52f),
             new ButtonAction("下一架", PrimaryButtonColor, FocusNextDrone, 60f)
         });
+        CreateStepperRow(content, "跟随高", out followHeightValueText, OnDecreaseFollowHeightClicked, OnIncreaseFollowHeightClicked);
+        CreateStepperRow(content, "跟随距", out followDistanceValueText, OnDecreaseFollowDistanceClicked, OnIncreaseFollowDistanceClicked);
 
         LayoutRebuilder.ForceRebuildLayoutImmediate(content);
         scrollRect.verticalNormalizedPosition = 1f;
@@ -362,6 +447,13 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
             schedulerIndex = Array.IndexOf(schedulerOptions, droneManager.schedulerAlgorithm);
             plannerIndex = Array.IndexOf(plannerOptions, droneManager.pathPlannerType);
             configuredDroneCount = Mathf.Clamp(droneManager.droneCount, MinDroneCount, MaxDroneCount);
+            configuredPlanningGridCellSize = Mathf.Clamp(droneManager.planningGridCellSize, MinPlanningGridCellSize, MaxPlanningGridCellSize);
+            configuredPlanningMinX = droneManager.planningWorldMin.x;
+            configuredPlanningMaxX = droneManager.planningWorldMax.x;
+            configuredPlanningMinZ = droneManager.planningWorldMin.z;
+            configuredPlanningMaxZ = droneManager.planningWorldMax.z;
+            configuredAllowDiagonalPlanning = droneManager.allowDiagonalPlanning;
+            configuredAutoConfigureObstacles = droneManager.autoConfigurePlanningObstacles;
 
             if (droneManager.drones.Count > 0 && droneManager.drones[0] != null)
             {
@@ -381,6 +473,18 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
 
         configuredDroneSpeed = Mathf.Clamp(configuredDroneSpeed <= 0f ? 5f : configuredDroneSpeed, MinDroneSpeed, MaxDroneSpeed);
         configuredTimeScale = Mathf.Clamp(Time.timeScale <= 0f ? 1f : Time.timeScale, MinTimeScale, MaxTimeScale);
+        NormalizePlanningBounds();
+
+        if (cameraManager != null)
+        {
+            configuredFollowHeight = Mathf.Clamp(cameraManager.followOffset.y, MinFollowHeight, MaxFollowHeight);
+            configuredFollowDistance = Mathf.Clamp(Mathf.Abs(cameraManager.followOffset.z), MinFollowDistance, MaxFollowDistance);
+        }
+        else
+        {
+            configuredFollowHeight = Mathf.Clamp(configuredFollowHeight, MinFollowHeight, MaxFollowHeight);
+            configuredFollowDistance = Mathf.Clamp(configuredFollowDistance, MinFollowDistance, MaxFollowDistance);
+        }
 
         if (schedulerIndex < 0)
         {
@@ -415,13 +519,50 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
             droneSpeedValueText.text = $"{configuredDroneSpeed:0.0}m/s";
         }
 
+        if (planningGridValueText != null)
+        {
+            planningGridValueText.text = $"{configuredPlanningGridCellSize:0.0}m";
+        }
+
+        if (planningMinXValueText != null)
+        {
+            planningMinXValueText.text = configuredPlanningMinX.ToString("0");
+        }
+
+        if (planningMaxXValueText != null)
+        {
+            planningMaxXValueText.text = configuredPlanningMaxX.ToString("0");
+        }
+
+        if (planningMinZValueText != null)
+        {
+            planningMinZValueText.text = configuredPlanningMinZ.ToString("0");
+        }
+
+        if (planningMaxZValueText != null)
+        {
+            planningMaxZValueText.text = configuredPlanningMaxZ.ToString("0");
+        }
+
         if (timeScaleValueText != null)
         {
             timeScaleValueText.text = $"{configuredTimeScale:0.00}x";
         }
 
+        if (followHeightValueText != null)
+        {
+            followHeightValueText.text = $"{configuredFollowHeight:0.0}m";
+        }
+
+        if (followDistanceValueText != null)
+        {
+            followDistanceValueText.text = $"{configuredFollowDistance:0.0}m";
+        }
+
         UpdateToggleButton(plannedPathToggleButton, showPlannedPath);
         UpdateToggleButton(trailToggleButton, showTrail);
+        UpdateToggleButton(diagonalPlanningToggleButton, configuredAllowDiagonalPlanning);
+        UpdateToggleButton(obstacleAutoConfigToggleButton, configuredAutoConfigureObstacles);
 
         if (expandButtonText != null)
         {
@@ -442,8 +583,13 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         }
 
         int droneCount = droneManager != null ? droneManager.drones.Count : 0;
-        int taskCount = FindObjectsOfType<TaskPoint>().Length;
+        TaskPoint[] taskPoints = FindObjectsOfType<TaskPoint>();
+        int totalTaskCount = taskPoints.Length;
+        int completedTaskCount = CountTasksByState(taskPoints, TaskState.Completed);
+        int waitingDroneCount = CountDronesByState(DroneState.Waiting);
+        int spawnPointCount = spawnPointManager != null ? spawnPointManager.GetSpawnPointCount() : 0;
         string simulationState = simulationManager != null ? FormatSimulationState(simulationManager.currentState) : "未知";
+        string elapsedTime = simulationManager != null ? FormatDuration(simulationManager.ElapsedSimulationTime) : "--:--";
         string cameraMode = "未连接";
         string cameraTarget = "-";
 
@@ -453,7 +599,11 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
             cameraTarget = cameraManager.targetDrone != null ? cameraManager.targetDrone.name : "-";
         }
 
-        summaryText.text = $"状态 {simulationState}  机群 {droneCount}  任务 {taskCount}\n镜头 {cameraMode}  目标 {cameraTarget}";
+        summaryText.text =
+            $"状态 {simulationState}  用时 {elapsedTime}  任务 {completedTaskCount}/{totalTaskCount}\n" +
+            $"镜头 {cameraMode}  目标 {cameraTarget}  等待 {waitingDroneCount}  机群 {droneCount}  起点 {spawnPointCount}";
+
+        RefreshStats(taskPoints, cameraTarget);
     }
 
     private void ToggleExpanded()
@@ -532,6 +682,84 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         RefreshAllLabels();
     }
 
+    private void OnDecreasePlanningGridClicked()
+    {
+        configuredPlanningGridCellSize = Mathf.Clamp(
+            configuredPlanningGridCellSize - PlanningGridCellSizeStep,
+            MinPlanningGridCellSize,
+            MaxPlanningGridCellSize);
+        ApplyPlanningSettings();
+    }
+
+    private void OnIncreasePlanningGridClicked()
+    {
+        configuredPlanningGridCellSize = Mathf.Clamp(
+            configuredPlanningGridCellSize + PlanningGridCellSizeStep,
+            MinPlanningGridCellSize,
+            MaxPlanningGridCellSize);
+        ApplyPlanningSettings();
+    }
+
+    private void OnDecreasePlanningMinXClicked()
+    {
+        configuredPlanningMinX -= PlanningBoundaryStep;
+        ApplyPlanningSettings();
+    }
+
+    private void OnIncreasePlanningMinXClicked()
+    {
+        configuredPlanningMinX += PlanningBoundaryStep;
+        ApplyPlanningSettings();
+    }
+
+    private void OnDecreasePlanningMaxXClicked()
+    {
+        configuredPlanningMaxX -= PlanningBoundaryStep;
+        ApplyPlanningSettings();
+    }
+
+    private void OnIncreasePlanningMaxXClicked()
+    {
+        configuredPlanningMaxX += PlanningBoundaryStep;
+        ApplyPlanningSettings();
+    }
+
+    private void OnDecreasePlanningMinZClicked()
+    {
+        configuredPlanningMinZ -= PlanningBoundaryStep;
+        ApplyPlanningSettings();
+    }
+
+    private void OnIncreasePlanningMinZClicked()
+    {
+        configuredPlanningMinZ += PlanningBoundaryStep;
+        ApplyPlanningSettings();
+    }
+
+    private void OnDecreasePlanningMaxZClicked()
+    {
+        configuredPlanningMaxZ -= PlanningBoundaryStep;
+        ApplyPlanningSettings();
+    }
+
+    private void OnIncreasePlanningMaxZClicked()
+    {
+        configuredPlanningMaxZ += PlanningBoundaryStep;
+        ApplyPlanningSettings();
+    }
+
+    private void ToggleDiagonalPlanning()
+    {
+        configuredAllowDiagonalPlanning = !configuredAllowDiagonalPlanning;
+        ApplyPlanningSettings();
+    }
+
+    private void ToggleObstacleAutoConfiguration()
+    {
+        configuredAutoConfigureObstacles = !configuredAutoConfigureObstacles;
+        ApplyPlanningSettings();
+    }
+
     private void OnDecreaseDroneCountClicked()
     {
         configuredDroneCount = Mathf.Clamp(configuredDroneCount - 1, MinDroneCount, MaxDroneCount);
@@ -582,11 +810,70 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         RefreshSummary();
     }
 
+    private void ApplyPlanningSettings()
+    {
+        NormalizePlanningBounds();
+
+        if (droneManager != null)
+        {
+            droneManager.ApplyPlanningSettings(
+                configuredPlanningGridCellSize,
+                configuredAllowDiagonalPlanning,
+                configuredAutoConfigureObstacles,
+                BuildPlanningWorldMin(),
+                BuildPlanningWorldMax());
+        }
+
+        transientMessage =
+            $"规划 网格{configuredPlanningGridCellSize:0.0}m 边界X[{configuredPlanningMinX:0},{configuredPlanningMaxX:0}] Z[{configuredPlanningMinZ:0},{configuredPlanningMaxZ:0}]";
+        RefreshAllLabels();
+        RefreshSummary();
+    }
+
     private void ApplyTimeScaleSettings()
     {
         Time.timeScale = configuredTimeScale;
         transientMessage = $"仿真倍速 {configuredTimeScale:0.00}x";
         RefreshAllLabels();
+    }
+
+    private void OnDecreaseFollowHeightClicked()
+    {
+        configuredFollowHeight = Mathf.Clamp(configuredFollowHeight - FollowHeightStep, MinFollowHeight, MaxFollowHeight);
+        ApplyCameraFollowSettings();
+    }
+
+    private void OnIncreaseFollowHeightClicked()
+    {
+        configuredFollowHeight = Mathf.Clamp(configuredFollowHeight + FollowHeightStep, MinFollowHeight, MaxFollowHeight);
+        ApplyCameraFollowSettings();
+    }
+
+    private void OnDecreaseFollowDistanceClicked()
+    {
+        configuredFollowDistance = Mathf.Clamp(configuredFollowDistance - FollowDistanceStep, MinFollowDistance, MaxFollowDistance);
+        ApplyCameraFollowSettings();
+    }
+
+    private void OnIncreaseFollowDistanceClicked()
+    {
+        configuredFollowDistance = Mathf.Clamp(configuredFollowDistance + FollowDistanceStep, MinFollowDistance, MaxFollowDistance);
+        ApplyCameraFollowSettings();
+    }
+
+    private void ApplyCameraFollowSettings()
+    {
+        if (cameraManager != null)
+        {
+            cameraManager.SetFollowOffset(new Vector3(
+                cameraManager.followOffset.x,
+                configuredFollowHeight,
+                -configuredFollowDistance));
+        }
+
+        transientMessage = $"跟随镜头 高度{configuredFollowHeight:0.0}m 距离{configuredFollowDistance:0.0}m";
+        RefreshAllLabels();
+        RefreshSummary();
     }
 
     private void TogglePlannedPath()
@@ -628,6 +915,12 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
 
         droneManager.schedulerAlgorithm = schedulerOptions[schedulerIndex];
         droneManager.pathPlannerType = plannerOptions[plannerIndex];
+        droneManager.ApplyPlanningSettings(
+            configuredPlanningGridCellSize,
+            configuredAllowDiagonalPlanning,
+            configuredAutoConfigureObstacles,
+            BuildPlanningWorldMin(),
+            BuildPlanningWorldMax());
         droneManager.RespawnDrones(configuredDroneCount);
         droneManager.ApplyDroneSpeedToAll(configuredDroneSpeed);
         droneManager.ApplyPathVisibilityToAll(showPlannedPath, showTrail);
@@ -640,6 +933,10 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         if (cameraManager != null)
         {
             cameraManager.RefreshManagedDrones();
+            cameraManager.SetFollowOffset(new Vector3(
+                cameraManager.followOffset.x,
+                configuredFollowHeight,
+                -configuredFollowDistance));
         }
 
         transientMessage = $"机群已重建为 {configuredDroneCount} 架";
@@ -653,8 +950,22 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         {
             droneManager.schedulerAlgorithm = schedulerOptions[schedulerIndex];
             droneManager.pathPlannerType = plannerOptions[plannerIndex];
+            droneManager.ApplyPlanningSettings(
+                configuredPlanningGridCellSize,
+                configuredAllowDiagonalPlanning,
+                configuredAutoConfigureObstacles,
+                BuildPlanningWorldMin(),
+                BuildPlanningWorldMax());
             droneManager.ApplyDroneSpeedToAll(configuredDroneSpeed);
             droneManager.ApplyPathVisibilityToAll(showPlannedPath, showTrail);
+        }
+
+        if (cameraManager != null)
+        {
+            cameraManager.SetFollowOffset(new Vector3(
+                cameraManager.followOffset.x,
+                configuredFollowHeight,
+                -configuredFollowDistance));
         }
 
         transientMessage = "已同步到当前机群";
@@ -697,6 +1008,88 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
 
         cameraManager.FocusNextDrone();
         transientMessage = "已切换到下一架";
+        RefreshAllLabels();
+        RefreshSummary();
+    }
+
+    private void ExportCurrentResultToCsv()
+    {
+        if (resultExporter == null)
+        {
+            transientMessage = "未找到结果导出器";
+            RefreshAllLabels();
+            return;
+        }
+
+        bool exported = resultExporter.ExportCurrentResult();
+        transientMessage = exported
+            ? resultExporter.LastExportMessage
+            : resultExporter.LastExportMessage;
+        RefreshAllLabels();
+    }
+
+    private void ToggleSpawnPointPlacement()
+    {
+        if (spawnPointManager == null)
+        {
+            transientMessage = "未找到起飞点管理器";
+            RefreshAllLabels();
+            return;
+        }
+
+        spawnPointManager.TogglePlacementMode();
+        transientMessage = spawnPointManager.IsPlacementMode
+            ? "已进入起飞点放置模式，点击地面放置"
+            : "已取消起飞点放置模式";
+        RefreshAllLabels();
+        RefreshSummary();
+    }
+
+    private void ToggleSpawnPointDeletion()
+    {
+        if (spawnPointManager == null)
+        {
+            transientMessage = "未找到起飞点管理器";
+            RefreshAllLabels();
+            return;
+        }
+
+        spawnPointManager.ToggleDeleteMode();
+        transientMessage = spawnPointManager.IsDeleteMode
+            ? "已进入起飞点删除模式，点击已有起点删除"
+            : "已取消起飞点删除模式";
+        RefreshAllLabels();
+        RefreshSummary();
+    }
+
+    private void ToggleSpawnPointMove()
+    {
+        if (spawnPointManager == null)
+        {
+            transientMessage = "未找到起飞点管理器";
+            RefreshAllLabels();
+            return;
+        }
+
+        spawnPointManager.ToggleMoveMode();
+        transientMessage = spawnPointManager.IsMoveMode
+            ? "已进入起飞点移动模式，先点起点再点新位置"
+            : "已取消起飞点移动模式";
+        RefreshAllLabels();
+        RefreshSummary();
+    }
+
+    private void ClearSpawnPoints()
+    {
+        if (spawnPointManager == null)
+        {
+            transientMessage = "未找到起飞点管理器";
+            RefreshAllLabels();
+            return;
+        }
+
+        spawnPointManager.ClearSpawnPoints();
+        transientMessage = "已清空手动起飞点";
         RefreshAllLabels();
         RefreshSummary();
     }
@@ -753,6 +1146,35 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         {
             CreateActionButton(row, actions[i].label, actions[i].color, actions[i].callback, actions[i].width);
         }
+    }
+
+    private void CreateInfoCard(
+        RectTransform parent,
+        string name,
+        out TMP_Text bodyText,
+        out LayoutElement layoutElement,
+        float preferredHeight)
+    {
+        GameObject cardObject = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        RectTransform card = cardObject.GetComponent<RectTransform>();
+        card.SetParent(parent, false);
+
+        layoutElement = card.gameObject.AddComponent<LayoutElement>();
+        layoutElement.minHeight = preferredHeight;
+        layoutElement.preferredHeight = preferredHeight;
+
+        Image cardImage = card.GetComponent<Image>();
+        ConfigureImageGraphic(cardImage);
+        cardImage.color = RowColor;
+        cardImage.raycastTarget = false;
+
+        bodyText = CreateText("BodyText", card, string.Empty, 12.5f, PrimaryTextColor, FontStyles.Normal);
+        bodyText.enableWordWrapping = true;
+        bodyText.alignment = TextAlignmentOptions.TopLeft;
+        bodyText.rectTransform.anchorMin = Vector2.zero;
+        bodyText.rectTransform.anchorMax = Vector2.one;
+        bodyText.rectTransform.offsetMin = new Vector2(10f, 8f);
+        bodyText.rectTransform.offsetMax = new Vector2(-10f, -8f);
     }
 
     private RectTransform CreateRow(RectTransform parent, string label)
@@ -1001,6 +1423,214 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
             default:
                 return "就绪";
         }
+    }
+
+    private void NormalizePlanningBounds()
+    {
+        float minimumSpan = Mathf.Max(configuredPlanningGridCellSize * 2f, 4f);
+
+        configuredPlanningMinX = Mathf.Clamp(configuredPlanningMinX, MinPlanningBoundary, MaxPlanningBoundary - minimumSpan);
+        configuredPlanningMaxX = Mathf.Clamp(configuredPlanningMaxX, configuredPlanningMinX + minimumSpan, MaxPlanningBoundary);
+        configuredPlanningMinZ = Mathf.Clamp(configuredPlanningMinZ, MinPlanningBoundary, MaxPlanningBoundary - minimumSpan);
+        configuredPlanningMaxZ = Mathf.Clamp(configuredPlanningMaxZ, configuredPlanningMinZ + minimumSpan, MaxPlanningBoundary);
+    }
+
+    private Vector3 BuildPlanningWorldMin()
+    {
+        float y = droneManager != null ? droneManager.planningWorldMin.y : 0f;
+        return new Vector3(configuredPlanningMinX, y, configuredPlanningMinZ);
+    }
+
+    private Vector3 BuildPlanningWorldMax()
+    {
+        float y = droneManager != null ? droneManager.planningWorldMax.y : 10f;
+        return new Vector3(configuredPlanningMaxX, y, configuredPlanningMaxZ);
+    }
+
+    private void RefreshStats(TaskPoint[] taskPoints, string cameraTarget)
+    {
+        if (statsText == null)
+        {
+            return;
+        }
+
+        int totalTaskCount = taskPoints != null ? taskPoints.Length : 0;
+        int pendingTaskCount = CountTasksByState(taskPoints, TaskState.Pending);
+        int inProgressTaskCount = CountTasksByState(taskPoints, TaskState.InProgress);
+        int completedTaskCount = CountTasksByState(taskPoints, TaskState.Completed);
+
+        int idleDroneCount = CountDronesByState(DroneState.Idle);
+        int movingDroneCount = CountDronesByState(DroneState.Moving);
+        int waitingDroneCount = CountDronesByState(DroneState.Waiting);
+        int finishedDroneCount = CountDronesByState(DroneState.Finished);
+
+        float totalFlightDistance = 0f;
+        int droneCount = 0;
+        if (droneManager != null && droneManager.droneDataList != null)
+        {
+            foreach (DroneData data in droneManager.droneDataList)
+            {
+                if (data == null)
+                {
+                    continue;
+                }
+
+                totalFlightDistance += data.totalFlightDistance;
+                droneCount++;
+            }
+        }
+
+        float averageFlightDistance = droneCount > 0 ? totalFlightDistance / droneCount : 0f;
+        string schedulerName = schedulerOptions != null && schedulerOptions.Length > 0
+            ? FormatSchedulerName(schedulerOptions[schedulerIndex])
+            : "-";
+        string plannerName = plannerOptions != null && plannerOptions.Length > 0
+            ? FormatPlannerName(plannerOptions[plannerIndex])
+            : "-";
+        string elapsedTime = simulationManager != null ? FormatDuration(simulationManager.ElapsedSimulationTime) : "--:--";
+
+        StringBuilder builder = new StringBuilder(512);
+        builder.Append("调度算法: ").Append(schedulerName)
+            .Append("    路径规划: ").Append(plannerName).AppendLine();
+        builder.Append("任务进度: ").Append(completedTaskCount).Append(" / ").Append(totalTaskCount).AppendLine();
+        builder.Append("待执行 / 执行中 / 已完成: ")
+            .Append(pendingTaskCount).Append(" / ")
+            .Append(inProgressTaskCount).Append(" / ")
+            .Append(completedTaskCount).AppendLine();
+        builder.Append("无人机状态: 空闲 ").Append(idleDroneCount)
+            .Append("  移动 ").Append(movingDroneCount)
+            .Append("  等待 ").Append(waitingDroneCount)
+            .Append("  完成 ").Append(finishedDroneCount).AppendLine();
+        builder.Append("总飞行距离: ").Append(totalFlightDistance.ToString("0.0"))
+            .Append(" m    平均单机: ").Append(averageFlightDistance.ToString("0.0")).Append(" m").AppendLine();
+        builder.Append("仿真耗时: ").Append(elapsedTime)
+            .Append("    当前跟随: ").Append(string.IsNullOrWhiteSpace(cameraTarget) ? "-" : cameraTarget);
+
+        if (droneManager != null && droneManager.droneDataList != null && droneManager.droneDataList.Count > 0)
+        {
+            builder.AppendLine().AppendLine();
+            for (int i = 0; i < droneManager.droneDataList.Count; i++)
+            {
+                DroneData data = droneManager.droneDataList[i];
+                if (data == null)
+                {
+                    continue;
+                }
+
+                int assignedTaskCount = data.taskQueue != null ? data.taskQueue.Length : 0;
+                builder.Append('[').Append(data.droneId.ToString("D2")).Append("] ")
+                    .Append(FormatDroneState(data.state))
+                    .Append(" | 完成 ").Append(data.completedTasks).Append('/').Append(assignedTaskCount)
+                    .Append(" | 距离 ").Append(data.totalFlightDistance.ToString("0.0")).Append(" m");
+
+                if (!string.IsNullOrWhiteSpace(data.currentPlannerName))
+                {
+                    builder.Append(" | ").Append(data.currentPlannerName);
+                }
+
+                if (data.state == DroneState.Waiting && !string.IsNullOrWhiteSpace(data.waitReason))
+                {
+                    builder.Append(" | ").Append(data.waitReason);
+                }
+
+                if (i < droneManager.droneDataList.Count - 1)
+                {
+                    builder.AppendLine();
+                }
+            }
+        }
+
+        statsText.text = builder.ToString();
+        RefreshStatsCardLayout();
+    }
+
+    private void RefreshStatsCardLayout()
+    {
+        if (statsText == null || statsCardLayoutElement == null)
+        {
+            return;
+        }
+
+        float textWidth = statsText.rectTransform.rect.width;
+        if (textWidth <= 1f)
+        {
+            textWidth = 280f;
+        }
+
+        Vector2 preferredSize = statsText.GetPreferredValues(statsText.text, textWidth, 0f);
+        float targetHeight = Mathf.Max(StatsCardMinHeight, preferredSize.y + StatsCardVerticalPadding);
+        statsCardLayoutElement.preferredHeight = targetHeight;
+
+        if (scrollContentRoot != null)
+        {
+            LayoutRebuilder.ForceRebuildLayoutImmediate(scrollContentRoot);
+        }
+    }
+
+    private int CountTasksByState(TaskPoint[] taskPoints, TaskState state)
+    {
+        if (taskPoints == null)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (int i = 0; i < taskPoints.Length; i++)
+        {
+            if (taskPoints[i] != null && taskPoints[i].currentState == state)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private int CountDronesByState(DroneState state)
+    {
+        if (droneManager == null || droneManager.droneDataList == null)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (int i = 0; i < droneManager.droneDataList.Count; i++)
+        {
+            DroneData data = droneManager.droneDataList[i];
+            if (data != null && data.state == state)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private string FormatDroneState(DroneState state)
+    {
+        switch (state)
+        {
+            case DroneState.Moving:
+                return "移动中";
+            case DroneState.Waiting:
+                return "等待中";
+            case DroneState.Finished:
+                return "已完成";
+            case DroneState.Idle:
+            default:
+                return "空闲";
+        }
+    }
+
+    private string FormatDuration(float seconds)
+    {
+        TimeSpan duration = TimeSpan.FromSeconds(Mathf.Max(0f, seconds));
+        if (duration.TotalHours >= 1d)
+        {
+            return duration.ToString(@"hh\:mm\:ss");
+        }
+
+        return duration.ToString(@"mm\:ss");
     }
 
     private readonly struct ButtonAction
