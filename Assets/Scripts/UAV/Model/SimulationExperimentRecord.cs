@@ -20,6 +20,7 @@ public class SimulationExperimentRecord
     public float elapsedSeconds;
     public float totalFlightDistance;
     public int totalWaitCount;
+    public int totalConflictCount;
     public string cameraTarget = "";
     public string notes = "";
     public string droneBreakdown = "";
@@ -27,7 +28,7 @@ public class SimulationExperimentRecord
     public static string CsvHeader =>
         "experiment_time,export_trigger,simulation_state,drone_count,online_drone_count," +
         "task_count,completed_task_count,pending_task_count,in_progress_task_count," +
-        "scheduler_algorithm,path_planner,elapsed_seconds,total_flight_distance,total_wait_count," +
+        "scheduler_algorithm,path_planner,elapsed_seconds,total_flight_distance,total_wait_count,total_conflict_count," +
         "camera_target,notes,drone_breakdown";
 
     public string ToCsvRow()
@@ -47,6 +48,7 @@ public class SimulationExperimentRecord
         AppendCsvField(builder, elapsedSeconds.ToString("0.###"));
         AppendCsvField(builder, totalFlightDistance.ToString("0.###"));
         AppendCsvField(builder, totalWaitCount.ToString());
+        AppendCsvField(builder, totalConflictCount.ToString());
         AppendCsvField(builder, cameraTarget);
         AppendCsvField(builder, notes);
         AppendCsvField(builder, droneBreakdown, true);

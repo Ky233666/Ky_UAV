@@ -95,6 +95,17 @@ public class DroneData
     public int waitCount = 0;
 
     /// <summary>
+    /// 本轮仿真累计记录到的冲突事件次数。
+    /// 该计数用于区分“等待次数”和“冲突触发次数”。
+    /// </summary>
+    public int conflictCount = 0;
+
+    /// <summary>
+    /// 最近一次冲突原因。
+    /// </summary>
+    public string lastConflictReason = "";
+
+    /// <summary>
     /// 获取当前目标任务点
     /// </summary>
     public TaskPoint GetCurrentTask()

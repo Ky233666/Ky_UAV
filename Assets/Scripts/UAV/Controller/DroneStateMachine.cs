@@ -62,6 +62,9 @@ public class DroneStateMachine : MonoBehaviour
     // 上一帧状态
     private DroneState previousState;
 
+    // 当前冲突片段标识，用于避免同一轮持续阻塞重复计数
+    private string activeConflictKey = string.Empty;
+
     void Awake()
     {
         // 尝试自动获取组件
@@ -161,6 +164,7 @@ public class DroneStateMachine : MonoBehaviour
         {
             case DroneState.Idle:
                 waitTimer = 0f;
+                ClearActiveConflict();
                 break;
 
             case DroneState.Moving:
@@ -179,6 +183,7 @@ public class DroneStateMachine : MonoBehaviour
 
             case DroneState.Finished:
                 waitTimer = 0f;
+                ClearActiveConflict();
                 break;
         }
     }
@@ -256,6 +261,9 @@ public class DroneStateMachine : MonoBehaviour
 
         if (TryFindAvoidanceBlocker(targetPos, out DroneController blocker, out string waitReason))
         {
+            RegisterConflict(
+                blocker != null ? $"avoidance:{blocker.droneId}" : "avoidance:unknown",
+                waitReason);
             SetWaiting(waitReason);
             return;
         }
@@ -267,9 +275,15 @@ public class DroneStateMachine : MonoBehaviour
         if (safeStep <= 0.001f)
         {
             string blockerName = separationBlocker != null ? separationBlocker.droneName : "前方无人机";
-            SetWaiting($"前方占用 {blockerName}");
+            string reason = $"前方占用 {blockerName}";
+            RegisterConflict(
+                separationBlocker != null ? $"occupied:{separationBlocker.droneId}" : "occupied:unknown",
+                reason);
+            SetWaiting(reason);
             return;
         }
+
+        ClearActiveConflict();
 
         droneController.transform.position += direction * safeStep;
     }
@@ -299,6 +313,7 @@ public class DroneStateMachine : MonoBehaviour
         {
             if (!TryFindNearestDroneWithinDistance(minimumSeparationDistance, out _))
             {
+                ClearActiveConflict();
                 ResumeMoving();
                 return;
             }
@@ -309,6 +324,7 @@ public class DroneStateMachine : MonoBehaviour
         {
             Debug.LogWarning($"[DroneStateMachine] {droneController?.droneName} 等待超时，强制继续");
             // 超时后可以强制继续，或者切换到其他状态
+            ClearActiveConflict();
             ChangeState(DroneState.Moving);
             return;
         }
@@ -363,6 +379,7 @@ public class DroneStateMachine : MonoBehaviour
             droneData.waitReason = "";
         }
 
+        ClearActiveConflict();
         ChangeState(DroneState.Moving);
     }
 
@@ -378,6 +395,8 @@ public class DroneStateMachine : MonoBehaviour
             droneData.totalFlightDistance = 0f;
             droneData.waitReason = "";
             droneData.waitCount = 0;
+            droneData.conflictCount = 0;
+            droneData.lastConflictReason = "";
             droneData.plannedPath.Clear();
             droneData.currentWaypointIndex = 0;
             droneData.currentPlannerName = "";
@@ -389,6 +408,7 @@ public class DroneStateMachine : MonoBehaviour
             droneController.ClearTarget();
         }
 
+        ClearActiveConflict();
         ChangeState(DroneState.Idle);
     }
 
@@ -755,6 +775,29 @@ public class DroneStateMachine : MonoBehaviour
         }
 
         return controller.TryGetCurrentTargetPosition(out targetPosition);
+    }
+
+    private void RegisterConflict(string conflictKey, string reason)
+    {
+        if (droneData == null)
+        {
+            return;
+        }
+
+        string normalizedKey = string.IsNullOrWhiteSpace(conflictKey) ? "conflict:unknown" : conflictKey;
+        if (string.Equals(activeConflictKey, normalizedKey, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        activeConflictKey = normalizedKey;
+        droneData.conflictCount++;
+        droneData.lastConflictReason = reason ?? string.Empty;
+    }
+
+    private void ClearActiveConflict()
+    {
+        activeConflictKey = string.Empty;
     }
 
     #endregion

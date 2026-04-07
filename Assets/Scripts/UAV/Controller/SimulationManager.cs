@@ -22,6 +22,10 @@ public class SimulationManager : MonoBehaviour
     [Tooltip("实验结果导出器")]
     public SimulationResultExporter resultExporter;
 
+    [Header("批量实验")]
+    [Tooltip("批量实验执行器")]
+    public BatchExperimentRunner batchExperimentRunner;
+
     [Header("任务设置")]
     [Tooltip("当场景中没有任务点时，自动尝试从 Resources 导入默认任务点")]
     public bool autoImportTasksWhenMissing = true;
@@ -303,11 +307,26 @@ public class SimulationManager : MonoBehaviour
             resultExporter.droneManager = droneManager;
         }
 
+        if (batchExperimentRunner == null)
+        {
+            batchExperimentRunner = GetComponent<BatchExperimentRunner>();
+            if (batchExperimentRunner == null)
+            {
+                batchExperimentRunner = gameObject.AddComponent<BatchExperimentRunner>();
+            }
+        }
+
+        batchExperimentRunner.simulationManager = this;
+        batchExperimentRunner.resultExporter = resultExporter;
+
         spawnPointManager.simulationManager = this;
         if (spawnPointManager.droneManager == null)
         {
             spawnPointManager.droneManager = droneManager;
         }
+
+        runtimeControlPanel.resultExporter = resultExporter;
+        runtimeControlPanel.batchExperimentRunner = batchExperimentRunner;
     }
 
     private void ResetAllTaskPointsInScene()

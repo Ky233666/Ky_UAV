@@ -1,6 +1,8 @@
 using System;
 using System.Collections;
 using System.Text;
+using System.Reflection;
+using System.Threading;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -12,6 +14,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     public DroneManager droneManager;
     public CameraManager cameraManager;
     public SimulationResultExporter resultExporter;
+    public BatchExperimentRunner batchExperimentRunner;
     public DroneSpawnPointUIManager spawnPointManager;
 
     [Header("Panel Layout")]
@@ -32,6 +35,9 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     private const float MinPlanningBoundary = -200f;
     private const float MaxPlanningBoundary = 200f;
     private const float PlanningBoundaryStep = 2f;
+    private const float MinPlanningHeight = -20f;
+    private const float MaxPlanningHeight = 120f;
+    private const float PlanningHeightStep = 1f;
     private const float MinTimeScale = 0.25f;
     private const float MaxTimeScale = 3f;
     private const float TimeScaleStep = 0.25f;
@@ -41,6 +47,8 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     private const float MinFollowDistance = 4f;
     private const float MaxFollowDistance = 20f;
     private const float FollowDistanceStep = 1f;
+    private const int MinBatchRunCount = 1;
+    private const int MaxBatchRunCount = 50;
     private const float StatsCardMinHeight = 168f;
     private const float StatsCardVerticalPadding = 18f;
 
@@ -70,12 +78,18 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     private TMP_Text planningMaxXValueText;
     private TMP_Text planningMinZValueText;
     private TMP_Text planningMaxZValueText;
+    private TMP_Text planningMinYValueText;
+    private TMP_Text planningMaxYValueText;
     private TMP_Text followHeightValueText;
     private TMP_Text followDistanceValueText;
+    private TMP_Text exportDirectoryStatusText;
+    private TMP_Text batchRunCountValueText;
+    private TMP_Text batchStatusText;
     private TMP_Text summaryText;
     private TMP_Text statsText;
     private TMP_Text footerText;
     private TMP_Text expandButtonText;
+    private TMP_InputField exportDirectoryInputField;
     private LayoutElement statsCardLayoutElement;
     private Button plannedPathToggleButton;
     private Button trailToggleButton;
@@ -96,12 +110,15 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     private float configuredPlanningMaxX = 80f;
     private float configuredPlanningMinZ = -20f;
     private float configuredPlanningMaxZ = 80f;
+    private float configuredPlanningMinY = 0f;
+    private float configuredPlanningMaxY = 10f;
     private float configuredFollowHeight = 5f;
     private float configuredFollowDistance = 10f;
     private bool showPlannedPath = true;
     private bool showTrail = true;
     private bool configuredAllowDiagonalPlanning = true;
     private bool configuredAutoConfigureObstacles = true;
+    private int configuredBatchRunCount = 5;
     private string transientMessage = "面板已就绪";
 
     private IEnumerator Start()
@@ -133,6 +150,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         if (Time.unscaledTime >= nextSummaryRefreshTime)
         {
             nextSummaryRefreshTime = Time.unscaledTime + 0.35f;
+            RefreshBatchStatus();
             RefreshSummary();
         }
     }
@@ -168,6 +186,15 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
             if (resultExporter == null)
             {
                 resultExporter = FindObjectOfType<SimulationResultExporter>();
+            }
+        }
+
+        if (batchExperimentRunner == null)
+        {
+            batchExperimentRunner = simulationManager != null ? simulationManager.batchExperimentRunner : null;
+            if (batchExperimentRunner == null)
+            {
+                batchExperimentRunner = FindObjectOfType<BatchExperimentRunner>();
             }
         }
 
@@ -380,9 +407,25 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         CreateInfoCard(content, "Stats", out statsText, out statsCardLayoutElement, StatsCardMinHeight);
 
         CreateSectionLabel(content, "结果");
+        CreateInfoCard(content, "ExportDirectory", out exportDirectoryStatusText, out _, 92f);
+        CreateInputButtonRow(content, "目录", out exportDirectoryInputField, new[]
+        {
+            new ButtonAction("选择", new Color(0.13f, 0.44f, 0.64f, 0.98f), BrowseCustomExportDirectory, 48f),
+            new ButtonAction("新会话", new Color(0.10f, 0.46f, 0.58f, 0.98f), StartNewExportSession, 60f),
+            new ButtonAction("应用", PrimaryButtonColor, ApplyCustomExportDirectory, 48f),
+            new ButtonAction("默认", SecondaryButtonColor, ResetExportDirectoryToDefault, 48f)
+        });
         CreateButtonStripRow(content, "导出", new[]
         {
-            new ButtonAction("导出CSV", PrimaryButtonColor, ExportCurrentResultToCsv, 72f)
+            new ButtonAction("导出CSV", PrimaryButtonColor, ExportCurrentResultToCsv, 68f),
+            new ButtonAction("导出JSON", new Color(0.08f, 0.48f, 0.62f, 0.98f), ExportCurrentResultToJson, 74f)
+        });
+        CreateInfoCard(content, "BatchStatus", out batchStatusText, out _, 64f);
+        CreateStepperRow(content, "批次数", out batchRunCountValueText, OnDecreaseBatchRunCountClicked, OnIncreaseBatchRunCountClicked);
+        CreateButtonStripRow(content, "批量", new[]
+        {
+            new ButtonAction("开始", PrimaryButtonColor, StartBatchExperiments, 56f),
+            new ButtonAction("停止", SecondaryButtonColor, StopBatchExperiments, 56f)
         });
 
         CreateSectionLabel(content, "起飞点");
@@ -407,6 +450,8 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         CreateStepperRow(content, "X最大", out planningMaxXValueText, OnDecreasePlanningMaxXClicked, OnIncreasePlanningMaxXClicked);
         CreateStepperRow(content, "Z最小", out planningMinZValueText, OnDecreasePlanningMinZClicked, OnIncreasePlanningMinZClicked);
         CreateStepperRow(content, "Z最大", out planningMaxZValueText, OnDecreasePlanningMaxZClicked, OnIncreasePlanningMaxZClicked);
+        CreateStepperRow(content, "高最小", out planningMinYValueText, OnDecreasePlanningMinYClicked, OnIncreasePlanningMinYClicked);
+        CreateStepperRow(content, "高最大", out planningMaxYValueText, OnDecreasePlanningMaxYClicked, OnIncreasePlanningMaxYClicked);
         CreateToggleRow(content, "对角", out diagonalPlanningToggleButton, ToggleDiagonalPlanning);
         CreateToggleRow(content, "障碍", out obstacleAutoConfigToggleButton, ToggleObstacleAutoConfiguration);
 
@@ -452,6 +497,8 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
             configuredPlanningMaxX = droneManager.planningWorldMax.x;
             configuredPlanningMinZ = droneManager.planningWorldMin.z;
             configuredPlanningMaxZ = droneManager.planningWorldMax.z;
+            configuredPlanningMinY = droneManager.planningWorldMin.y;
+            configuredPlanningMaxY = droneManager.planningWorldMax.y;
             configuredAllowDiagonalPlanning = droneManager.allowDiagonalPlanning;
             configuredAutoConfigureObstacles = droneManager.autoConfigurePlanningObstacles;
 
@@ -495,6 +542,13 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         {
             plannerIndex = 0;
         }
+
+        if (batchExperimentRunner != null)
+        {
+            configuredBatchRunCount = Mathf.Clamp(batchExperimentRunner.batchRunCount, MinBatchRunCount, MaxBatchRunCount);
+        }
+
+        RefreshExportDirectoryUi(true);
     }
 
     private void RefreshAllLabels()
@@ -544,6 +598,16 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
             planningMaxZValueText.text = configuredPlanningMaxZ.ToString("0");
         }
 
+        if (planningMinYValueText != null)
+        {
+            planningMinYValueText.text = configuredPlanningMinY.ToString("0");
+        }
+
+        if (planningMaxYValueText != null)
+        {
+            planningMaxYValueText.text = configuredPlanningMaxY.ToString("0");
+        }
+
         if (timeScaleValueText != null)
         {
             timeScaleValueText.text = $"{configuredTimeScale:0.00}x";
@@ -557,6 +621,11 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         if (followDistanceValueText != null)
         {
             followDistanceValueText.text = $"{configuredFollowDistance:0.0}m";
+        }
+
+        if (batchRunCountValueText != null)
+        {
+            batchRunCountValueText.text = configuredBatchRunCount.ToString();
         }
 
         UpdateToggleButton(plannedPathToggleButton, showPlannedPath);
@@ -573,6 +642,9 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         {
             footerText.text = transientMessage;
         }
+
+        RefreshExportDirectoryUi(false);
+        RefreshBatchStatus();
     }
 
     private void RefreshSummary()
@@ -587,6 +659,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         int totalTaskCount = taskPoints.Length;
         int completedTaskCount = CountTasksByState(taskPoints, TaskState.Completed);
         int waitingDroneCount = CountDronesByState(DroneState.Waiting);
+        int totalConflictCount = CountTotalConflictEvents();
         int spawnPointCount = spawnPointManager != null ? spawnPointManager.GetSpawnPointCount() : 0;
         string simulationState = simulationManager != null ? FormatSimulationState(simulationManager.currentState) : "未知";
         string elapsedTime = simulationManager != null ? FormatDuration(simulationManager.ElapsedSimulationTime) : "--:--";
@@ -601,7 +674,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
 
         summaryText.text =
             $"状态 {simulationState}  用时 {elapsedTime}  任务 {completedTaskCount}/{totalTaskCount}\n" +
-            $"镜头 {cameraMode}  目标 {cameraTarget}  等待 {waitingDroneCount}  机群 {droneCount}  起点 {spawnPointCount}";
+            $"镜头 {cameraMode}  目标 {cameraTarget}  等待 {waitingDroneCount}  冲突 {totalConflictCount}  机群 {droneCount}  起点 {spawnPointCount}";
 
         RefreshStats(taskPoints, cameraTarget);
     }
@@ -748,6 +821,30 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         ApplyPlanningSettings();
     }
 
+    private void OnDecreasePlanningMinYClicked()
+    {
+        configuredPlanningMinY -= PlanningHeightStep;
+        ApplyPlanningSettings();
+    }
+
+    private void OnIncreasePlanningMinYClicked()
+    {
+        configuredPlanningMinY += PlanningHeightStep;
+        ApplyPlanningSettings();
+    }
+
+    private void OnDecreasePlanningMaxYClicked()
+    {
+        configuredPlanningMaxY -= PlanningHeightStep;
+        ApplyPlanningSettings();
+    }
+
+    private void OnIncreasePlanningMaxYClicked()
+    {
+        configuredPlanningMaxY += PlanningHeightStep;
+        ApplyPlanningSettings();
+    }
+
     private void ToggleDiagonalPlanning()
     {
         configuredAllowDiagonalPlanning = !configuredAllowDiagonalPlanning;
@@ -825,7 +922,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         }
 
         transientMessage =
-            $"规划 网格{configuredPlanningGridCellSize:0.0}m 边界X[{configuredPlanningMinX:0},{configuredPlanningMaxX:0}] Z[{configuredPlanningMinZ:0},{configuredPlanningMaxZ:0}]";
+            $"规划 网格{configuredPlanningGridCellSize:0.0}m 边界X[{configuredPlanningMinX:0},{configuredPlanningMaxX:0}] Z[{configuredPlanningMinZ:0},{configuredPlanningMaxZ:0}] 高[{configuredPlanningMinY:0},{configuredPlanningMaxY:0}]";
         RefreshAllLabels();
         RefreshSummary();
     }
@@ -1028,6 +1125,167 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         RefreshAllLabels();
     }
 
+    private void ExportCurrentResultToJson()
+    {
+        if (resultExporter == null)
+        {
+            transientMessage = "未找到结果导出器";
+            RefreshAllLabels();
+            return;
+        }
+
+        bool exported = resultExporter.ExportCurrentResultAsJson();
+        transientMessage = exported
+            ? resultExporter.LastExportMessage
+            : resultExporter.LastExportMessage;
+        RefreshAllLabels();
+    }
+
+    private void ApplyCustomExportDirectory()
+    {
+        if (resultExporter == null)
+        {
+            transientMessage = "未找到结果导出器";
+            RefreshAllLabels();
+            return;
+        }
+
+        if (exportDirectoryInputField == null)
+        {
+            transientMessage = "目录输入框未初始化";
+            RefreshAllLabels();
+            return;
+        }
+
+        bool success = resultExporter.SetCustomExportDirectory(exportDirectoryInputField.text, out string message);
+        transientMessage = message;
+        RefreshExportDirectoryUi(success);
+        RefreshAllLabels();
+    }
+
+    private void BrowseCustomExportDirectory()
+    {
+        if (resultExporter == null)
+        {
+            transientMessage = "未找到结果导出器";
+            RefreshAllLabels();
+            return;
+        }
+
+        string initialDirectory = exportDirectoryInputField != null && !string.IsNullOrWhiteSpace(exportDirectoryInputField.text)
+            ? exportDirectoryInputField.text
+            : resultExporter.GetExportDirectoryPath();
+
+        if (!TryOpenFolderPicker(initialDirectory, out string selectedDirectory))
+        {
+            transientMessage = "当前环境未能打开目录选择器，可手动输入路径";
+            RefreshAllLabels();
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(selectedDirectory))
+        {
+            transientMessage = "已取消目录选择";
+            RefreshAllLabels();
+            return;
+        }
+
+        if (exportDirectoryInputField != null)
+        {
+            exportDirectoryInputField.SetTextWithoutNotify(selectedDirectory);
+        }
+
+        bool success = resultExporter.SetCustomExportDirectory(selectedDirectory, out string message);
+        transientMessage = message;
+        RefreshExportDirectoryUi(success);
+        RefreshAllLabels();
+    }
+
+    private void ResetExportDirectoryToDefault()
+    {
+        if (resultExporter == null)
+        {
+            transientMessage = "未找到结果导出器";
+            RefreshAllLabels();
+            return;
+        }
+
+        resultExporter.ResetExportDirectoryToDefault();
+        transientMessage = resultExporter.LastExportMessage;
+        RefreshExportDirectoryUi(true);
+        RefreshAllLabels();
+    }
+
+    private void StartNewExportSession()
+    {
+        if (resultExporter == null)
+        {
+            transientMessage = "未找到结果导出器";
+            RefreshAllLabels();
+            return;
+        }
+
+        string sessionFolderName = resultExporter.BeginNewArchiveSession();
+        transientMessage = $"已切换到新会话：{sessionFolderName}";
+        RefreshExportDirectoryUi(false);
+        RefreshAllLabels();
+    }
+
+    private void OnDecreaseBatchRunCountClicked()
+    {
+        configuredBatchRunCount = Mathf.Clamp(configuredBatchRunCount - 1, MinBatchRunCount, MaxBatchRunCount);
+        if (batchExperimentRunner != null)
+        {
+            batchExperimentRunner.SetBatchRunCount(configuredBatchRunCount);
+        }
+
+        transientMessage = $"批量实验轮数 {configuredBatchRunCount}";
+        RefreshAllLabels();
+    }
+
+    private void OnIncreaseBatchRunCountClicked()
+    {
+        configuredBatchRunCount = Mathf.Clamp(configuredBatchRunCount + 1, MinBatchRunCount, MaxBatchRunCount);
+        if (batchExperimentRunner != null)
+        {
+            batchExperimentRunner.SetBatchRunCount(configuredBatchRunCount);
+        }
+
+        transientMessage = $"批量实验轮数 {configuredBatchRunCount}";
+        RefreshAllLabels();
+    }
+
+    private void StartBatchExperiments()
+    {
+        if (batchExperimentRunner == null)
+        {
+            transientMessage = "未找到批量实验执行器";
+            RefreshAllLabels();
+            return;
+        }
+
+        batchExperimentRunner.SetBatchRunCount(configuredBatchRunCount);
+        batchExperimentRunner.StartBatch();
+        transientMessage = batchExperimentRunner.LastBatchMessage;
+        RefreshBatchStatus();
+        RefreshAllLabels();
+    }
+
+    private void StopBatchExperiments()
+    {
+        if (batchExperimentRunner == null)
+        {
+            transientMessage = "未找到批量实验执行器";
+            RefreshAllLabels();
+            return;
+        }
+
+        batchExperimentRunner.StopBatch();
+        transientMessage = batchExperimentRunner.LastBatchMessage;
+        RefreshBatchStatus();
+        RefreshAllLabels();
+    }
+
     private void ToggleSpawnPointPlacement()
     {
         if (spawnPointManager == null)
@@ -1148,6 +1406,79 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         }
     }
 
+    private void CreateInputButtonRow(
+        RectTransform parent,
+        string label,
+        out TMP_InputField inputField,
+        ButtonAction[] actions)
+    {
+        GameObject rowObject = new GameObject("Row_" + label, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        RectTransform row = rowObject.GetComponent<RectTransform>();
+        row.SetParent(parent, false);
+
+        LayoutElement rowLayout = row.gameObject.AddComponent<LayoutElement>();
+        rowLayout.preferredHeight = 62f;
+        rowLayout.minHeight = 62f;
+
+        Image rowImage = row.GetComponent<Image>();
+        ConfigureImageGraphic(rowImage);
+        rowImage.color = RowColor;
+        rowImage.raycastTarget = false;
+
+        VerticalLayoutGroup verticalLayout = row.gameObject.AddComponent<VerticalLayoutGroup>();
+        verticalLayout.padding = new RectOffset(8, 8, 4, 4);
+        verticalLayout.spacing = 4f;
+        verticalLayout.childAlignment = TextAnchor.UpperLeft;
+        verticalLayout.childControlWidth = true;
+        verticalLayout.childControlHeight = true;
+        verticalLayout.childForceExpandWidth = true;
+        verticalLayout.childForceExpandHeight = false;
+
+        RectTransform inputRow = new GameObject("InputRow", typeof(RectTransform)).GetComponent<RectTransform>();
+        inputRow.SetParent(row, false);
+        HorizontalLayoutGroup inputLayout = inputRow.gameObject.AddComponent<HorizontalLayoutGroup>();
+        inputLayout.spacing = 4f;
+        inputLayout.childAlignment = TextAnchor.MiddleLeft;
+        inputLayout.childControlWidth = true;
+        inputLayout.childControlHeight = true;
+        inputLayout.childForceExpandWidth = false;
+        inputLayout.childForceExpandHeight = false;
+        LayoutElement inputRowLayout = inputRow.gameObject.AddComponent<LayoutElement>();
+        inputRowLayout.preferredHeight = 24f;
+
+        TMP_Text labelText = CreateText("Label", inputRow, label, 14f, PrimaryTextColor, FontStyles.Normal);
+        LayoutElement labelLayout = labelText.gameObject.AddComponent<LayoutElement>();
+        labelLayout.preferredWidth = 40f;
+        labelLayout.minWidth = 40f;
+        labelLayout.flexibleWidth = 0f;
+        labelText.alignment = TextAlignmentOptions.Left;
+
+        inputField = CreateInputField(inputRow, label + "_Input", "输入导出目录");
+
+        RectTransform buttonRow = new GameObject("ButtonRow", typeof(RectTransform)).GetComponent<RectTransform>();
+        buttonRow.SetParent(row, false);
+        HorizontalLayoutGroup buttonLayout = buttonRow.gameObject.AddComponent<HorizontalLayoutGroup>();
+        buttonLayout.spacing = 4f;
+        buttonLayout.childAlignment = TextAnchor.MiddleRight;
+        buttonLayout.childControlWidth = true;
+        buttonLayout.childControlHeight = true;
+        buttonLayout.childForceExpandWidth = false;
+        buttonLayout.childForceExpandHeight = false;
+        LayoutElement buttonRowLayout = buttonRow.gameObject.AddComponent<LayoutElement>();
+        buttonRowLayout.preferredHeight = 24f;
+
+        GameObject spacer = new GameObject("Spacer", typeof(RectTransform));
+        spacer.transform.SetParent(buttonRow, false);
+        LayoutElement spacerLayout = spacer.AddComponent<LayoutElement>();
+        spacerLayout.flexibleWidth = 1f;
+        spacerLayout.minWidth = 0f;
+
+        for (int i = 0; i < actions.Length; i++)
+        {
+            CreateActionButton(buttonRow, actions[i].label, actions[i].color, actions[i].callback, actions[i].width);
+        }
+    }
+
     private void CreateInfoCard(
         RectTransform parent,
         string name,
@@ -1233,6 +1564,68 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         valueText.rectTransform.offsetMin = Vector2.zero;
         valueText.rectTransform.offsetMax = Vector2.zero;
         return valueText;
+    }
+
+    private TMP_InputField CreateInputField(RectTransform parent, string name, string placeholderText)
+    {
+        GameObject inputObject = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(TMP_InputField));
+        RectTransform rect = inputObject.GetComponent<RectTransform>();
+        rect.SetParent(parent, false);
+
+        LayoutElement layout = inputObject.AddComponent<LayoutElement>();
+        layout.flexibleWidth = 1f;
+        layout.minWidth = 130f;
+        layout.preferredHeight = 24f;
+
+        Image image = inputObject.GetComponent<Image>();
+        ConfigureImageGraphic(image);
+        image.color = new Color(0.09f, 0.20f, 0.28f, 0.98f);
+        image.raycastTarget = true;
+
+        TMP_InputField inputField = inputObject.GetComponent<TMP_InputField>();
+        inputField.transition = Selectable.Transition.ColorTint;
+        inputField.colors = BuildColorBlock(new Color(0.09f, 0.20f, 0.28f, 0.98f));
+        inputField.contentType = TMP_InputField.ContentType.Standard;
+        inputField.lineType = TMP_InputField.LineType.SingleLine;
+        inputField.characterLimit = 260;
+        inputField.customCaretColor = true;
+        inputField.caretColor = AccentColor;
+
+        RectTransform textArea = new GameObject("TextArea", typeof(RectTransform)).GetComponent<RectTransform>();
+        textArea.SetParent(rect, false);
+        textArea.anchorMin = Vector2.zero;
+        textArea.anchorMax = Vector2.one;
+        textArea.offsetMin = new Vector2(8f, 3f);
+        textArea.offsetMax = new Vector2(-8f, -3f);
+
+        TextMeshProUGUI textComponent = (TextMeshProUGUI)CreateText("Text", textArea, string.Empty, 11f, PrimaryTextColor, FontStyles.Normal);
+        textComponent.alignment = TextAlignmentOptions.Left;
+        textComponent.enableWordWrapping = false;
+        textComponent.overflowMode = TextOverflowModes.Ellipsis;
+        textComponent.rectTransform.anchorMin = Vector2.zero;
+        textComponent.rectTransform.anchorMax = Vector2.one;
+        textComponent.rectTransform.offsetMin = Vector2.zero;
+        textComponent.rectTransform.offsetMax = Vector2.zero;
+
+        TextMeshProUGUI placeholder = (TextMeshProUGUI)CreateText(
+            "Placeholder",
+            textArea,
+            placeholderText,
+            11f,
+            new Color(0.60f, 0.73f, 0.80f, 0.68f),
+            FontStyles.Normal);
+        placeholder.alignment = TextAlignmentOptions.Left;
+        placeholder.enableWordWrapping = false;
+        placeholder.overflowMode = TextOverflowModes.Ellipsis;
+        placeholder.rectTransform.anchorMin = Vector2.zero;
+        placeholder.rectTransform.anchorMax = Vector2.one;
+        placeholder.rectTransform.offsetMin = Vector2.zero;
+        placeholder.rectTransform.offsetMax = Vector2.zero;
+
+        inputField.textViewport = textArea;
+        inputField.textComponent = textComponent;
+        inputField.placeholder = placeholder;
+        return inputField;
     }
 
     private Button CreateActionButton(RectTransform parent, string label, Color color, Action onClicked, float width)
@@ -1387,6 +1780,176 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         return value;
     }
 
+    private bool TryOpenFolderPicker(string initialDirectory, out string selectedDirectory)
+    {
+        selectedDirectory = string.Empty;
+
+        if (TryOpenEditorFolderPanel(initialDirectory, out selectedDirectory))
+        {
+            return true;
+        }
+
+        return TryOpenWindowsFolderBrowser(initialDirectory, out selectedDirectory);
+    }
+
+    private bool TryOpenEditorFolderPanel(string initialDirectory, out string selectedDirectory)
+    {
+        selectedDirectory = string.Empty;
+
+        try
+        {
+            Type editorUtilityType = Type.GetType("UnityEditor.EditorUtility, UnityEditor");
+            if (editorUtilityType == null)
+            {
+                return false;
+            }
+
+            MethodInfo openFolderPanelMethod = editorUtilityType.GetMethod(
+                "OpenFolderPanel",
+                BindingFlags.Public | BindingFlags.Static,
+                null,
+                new[] { typeof(string), typeof(string), typeof(string) },
+                null);
+
+            if (openFolderPanelMethod == null)
+            {
+                return false;
+            }
+
+            object result = openFolderPanelMethod.Invoke(
+                null,
+                new object[] { "选择导出目录", initialDirectory ?? string.Empty, string.Empty });
+
+            selectedDirectory = result as string ?? string.Empty;
+            return true;
+        }
+        catch
+        {
+            selectedDirectory = string.Empty;
+            return false;
+        }
+    }
+
+    private bool TryOpenWindowsFolderBrowser(string initialDirectory, out string selectedDirectory)
+    {
+        selectedDirectory = string.Empty;
+
+        try
+        {
+            string dialogResultName = null;
+            string resolvedSelectedDirectory = string.Empty;
+            Exception threadException = null;
+            Thread pickerThread = new Thread(() =>
+            {
+                try
+                {
+                    Assembly winFormsAssembly = Assembly.Load("System.Windows.Forms");
+                    Type folderDialogType = winFormsAssembly.GetType("System.Windows.Forms.FolderBrowserDialog");
+                    Type dialogResultType = winFormsAssembly.GetType("System.Windows.Forms.DialogResult");
+                    if (folderDialogType == null || dialogResultType == null)
+                    {
+                        return;
+                    }
+
+                    using (IDisposable dialog = Activator.CreateInstance(folderDialogType) as IDisposable)
+                    {
+                        if (dialog == null)
+                        {
+                            return;
+                        }
+
+                        folderDialogType.GetProperty("Description")?.SetValue(dialog, "选择导出目录");
+                        folderDialogType.GetProperty("ShowNewFolderButton")?.SetValue(dialog, true);
+
+                        if (!string.IsNullOrWhiteSpace(initialDirectory))
+                        {
+                            folderDialogType.GetProperty("SelectedPath")?.SetValue(dialog, initialDirectory);
+                        }
+
+                        object result = folderDialogType.GetMethod("ShowDialog", Type.EmptyTypes)?.Invoke(dialog, null);
+                        if (result == null)
+                        {
+                            return;
+                        }
+
+                        dialogResultName = Enum.GetName(dialogResultType, result);
+                        if (string.Equals(dialogResultName, "OK", StringComparison.OrdinalIgnoreCase))
+                        {
+                            resolvedSelectedDirectory = folderDialogType.GetProperty("SelectedPath")?.GetValue(dialog) as string ?? string.Empty;
+                        }
+                    }
+                }
+                catch (Exception exception)
+                {
+                    threadException = exception;
+                }
+            });
+
+            pickerThread.SetApartmentState(ApartmentState.STA);
+            pickerThread.Start();
+            pickerThread.Join();
+
+            if (threadException != null)
+            {
+                return false;
+            }
+
+            selectedDirectory = resolvedSelectedDirectory;
+            return true;
+        }
+        catch
+        {
+            selectedDirectory = string.Empty;
+            return false;
+        }
+    }
+
+    private void RefreshExportDirectoryUi(bool syncInputText)
+    {
+        if (resultExporter == null)
+        {
+            return;
+        }
+
+        if (exportDirectoryStatusText != null)
+        {
+            string mode = resultExporter.IsUsingCustomExportDirectory ? "当前: 自定义目录" : "当前: 默认目录";
+            exportDirectoryStatusText.text =
+                $"{mode}\n" +
+                $"根目录: {resultExporter.GetExportDirectoryPath()}\n" +
+                $"归档: {resultExporter.GetArchiveDirectoryPath()}";
+        }
+
+        if (syncInputText && exportDirectoryInputField != null)
+        {
+            string pathForInput = resultExporter.IsUsingCustomExportDirectory
+                ? resultExporter.customExportDirectory
+                : resultExporter.GetExportDirectoryPath();
+            exportDirectoryInputField.SetTextWithoutNotify(pathForInput);
+        }
+    }
+
+    private void RefreshBatchStatus()
+    {
+        if (batchStatusText == null)
+        {
+            return;
+        }
+
+        if (batchExperimentRunner == null)
+        {
+            batchStatusText.text = "批量实验未连接";
+            return;
+        }
+
+        string state = batchExperimentRunner.IsBatchRunning ? "运行中" : "空闲";
+        int totalRunCount = Mathf.Clamp(batchExperimentRunner.batchRunCount, MinBatchRunCount, MaxBatchRunCount);
+        batchStatusText.text =
+            $"状态: {state}\n" +
+            $"进度: {batchExperimentRunner.CompletedRunCount}/{totalRunCount}  当前轮: {Mathf.Max(batchExperimentRunner.CurrentRunIndex, 0)}\n" +
+            batchExperimentRunner.LastBatchMessage;
+    }
+
     private string FormatSchedulerName(SchedulerAlgorithmType algorithmType)
     {
         switch (algorithmType)
@@ -1428,23 +1991,24 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     private void NormalizePlanningBounds()
     {
         float minimumSpan = Mathf.Max(configuredPlanningGridCellSize * 2f, 4f);
+        float minimumHeightSpan = 1f;
 
         configuredPlanningMinX = Mathf.Clamp(configuredPlanningMinX, MinPlanningBoundary, MaxPlanningBoundary - minimumSpan);
         configuredPlanningMaxX = Mathf.Clamp(configuredPlanningMaxX, configuredPlanningMinX + minimumSpan, MaxPlanningBoundary);
         configuredPlanningMinZ = Mathf.Clamp(configuredPlanningMinZ, MinPlanningBoundary, MaxPlanningBoundary - minimumSpan);
         configuredPlanningMaxZ = Mathf.Clamp(configuredPlanningMaxZ, configuredPlanningMinZ + minimumSpan, MaxPlanningBoundary);
+        configuredPlanningMinY = Mathf.Clamp(configuredPlanningMinY, MinPlanningHeight, MaxPlanningHeight - minimumHeightSpan);
+        configuredPlanningMaxY = Mathf.Clamp(configuredPlanningMaxY, configuredPlanningMinY + minimumHeightSpan, MaxPlanningHeight);
     }
 
     private Vector3 BuildPlanningWorldMin()
     {
-        float y = droneManager != null ? droneManager.planningWorldMin.y : 0f;
-        return new Vector3(configuredPlanningMinX, y, configuredPlanningMinZ);
+        return new Vector3(configuredPlanningMinX, configuredPlanningMinY, configuredPlanningMinZ);
     }
 
     private Vector3 BuildPlanningWorldMax()
     {
-        float y = droneManager != null ? droneManager.planningWorldMax.y : 10f;
-        return new Vector3(configuredPlanningMaxX, y, configuredPlanningMaxZ);
+        return new Vector3(configuredPlanningMaxX, configuredPlanningMaxY, configuredPlanningMaxZ);
     }
 
     private void RefreshStats(TaskPoint[] taskPoints, string cameraTarget)
@@ -1465,6 +2029,8 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         int finishedDroneCount = CountDronesByState(DroneState.Finished);
 
         float totalFlightDistance = 0f;
+        int totalWaitCount = 0;
+        int totalConflictCount = 0;
         int droneCount = 0;
         if (droneManager != null && droneManager.droneDataList != null)
         {
@@ -1476,6 +2042,8 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
                 }
 
                 totalFlightDistance += data.totalFlightDistance;
+                totalWaitCount += data.waitCount;
+                totalConflictCount += data.conflictCount;
                 droneCount++;
             }
         }
@@ -1503,6 +2071,8 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
             .Append("  完成 ").Append(finishedDroneCount).AppendLine();
         builder.Append("总飞行距离: ").Append(totalFlightDistance.ToString("0.0"))
             .Append(" m    平均单机: ").Append(averageFlightDistance.ToString("0.0")).Append(" m").AppendLine();
+        builder.Append("等待次数: ").Append(totalWaitCount)
+            .Append("    冲突次数: ").Append(totalConflictCount).AppendLine();
         builder.Append("仿真耗时: ").Append(elapsedTime)
             .Append("    当前跟随: ").Append(string.IsNullOrWhiteSpace(cameraTarget) ? "-" : cameraTarget);
 
@@ -1521,7 +2091,9 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
                 builder.Append('[').Append(data.droneId.ToString("D2")).Append("] ")
                     .Append(FormatDroneState(data.state))
                     .Append(" | 完成 ").Append(data.completedTasks).Append('/').Append(assignedTaskCount)
-                    .Append(" | 距离 ").Append(data.totalFlightDistance.ToString("0.0")).Append(" m");
+                    .Append(" | 距离 ").Append(data.totalFlightDistance.ToString("0.0")).Append(" m")
+                    .Append(" | 等待 ").Append(data.waitCount)
+                    .Append(" | 冲突 ").Append(data.conflictCount);
 
                 if (!string.IsNullOrWhiteSpace(data.currentPlannerName))
                 {
@@ -1584,6 +2156,26 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         }
 
         return count;
+    }
+
+    private int CountTotalConflictEvents()
+    {
+        if (droneManager == null || droneManager.droneDataList == null)
+        {
+            return 0;
+        }
+
+        int total = 0;
+        for (int i = 0; i < droneManager.droneDataList.Count; i++)
+        {
+            DroneData data = droneManager.droneDataList[i];
+            if (data != null)
+            {
+                total += data.conflictCount;
+            }
+        }
+
+        return total;
     }
 
     private int CountDronesByState(DroneState state)
