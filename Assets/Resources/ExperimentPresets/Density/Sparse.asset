@@ -1,0 +1,23 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d8415ea366e70e9409e1ba3cf720eccf, type: 3}
+  m_Name: Sparse
+  m_EditorClassIdentifier: 
+  presetName: Density Sparse
+  groupName: density
+  notePrefix: density-sparse
+  batchRuns: 5
+  droneCount: 4
+  scheduler: 2
+  planner: 1
+  planningWorldMin: {x: -125.63348, y: 0, z: -94.19592}
+  planningWorldMax: {x: 54.366524, y: 10, z: 85.80408}

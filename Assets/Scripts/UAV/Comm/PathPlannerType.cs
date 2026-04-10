@@ -4,5 +4,6 @@
 public enum PathPlannerType
 {
     StraightLine = 0,
-    AStar = 1
+    AStar = 1,
+    RRT = 2
 }

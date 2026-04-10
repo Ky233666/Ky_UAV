@@ -73,6 +73,12 @@ public class GreedyNearestScheduler : ISchedulerAlgorithm
                     continue;
                 }
 
+                if (request.maxTaskCapacity > 0 &&
+                    assignments[drone.droneId].assignedTasks.Count >= request.maxTaskCapacity)
+                {
+                    continue;
+                }
+
                 Vector3 currentPosition = currentPositions.TryGetValue(drone.droneId, out Vector3 knownPosition)
                     ? knownPosition
                     : request.fallbackSpawnOrigin;
@@ -98,8 +104,7 @@ public class GreedyNearestScheduler : ISchedulerAlgorithm
 
             if (bestDrone == null || bestTask == null)
             {
-                result.message = "贪心调度中断，未找到可分配组合";
-                return result;
+                break;
             }
 
             assignments[bestDrone.droneId].assignedTasks.Add(bestTask);
@@ -115,8 +120,11 @@ public class GreedyNearestScheduler : ISchedulerAlgorithm
             }
         }
 
-        result.success = true;
-        result.message = $"已按贪心最近优先策略为 {result.assignments.Count} 架无人机生成任务分配";
+        int assignedTaskCount = tasks.Count - remainingTasks.Count;
+        result.success = assignedTaskCount == tasks.Count;
+        result.message = assignedTaskCount == tasks.Count
+            ? $"已按贪心最近优先策略为 {result.assignments.Count} 架无人机生成任务分配"
+            : $"贪心最近优先受任务容量限制，仅分配 {assignedTaskCount}/{tasks.Count} 个任务";
         return result;
     }
 }

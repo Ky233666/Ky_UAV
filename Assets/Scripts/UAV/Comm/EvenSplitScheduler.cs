@@ -40,6 +40,10 @@ public class EvenSplitScheduler : ISchedulerAlgorithm
         }
 
         int tasksPerDrone = UnityEngine.Mathf.CeilToInt((float)tasks.Count / drones.Count);
+        if (request.maxTaskCapacity > 0)
+        {
+            tasksPerDrone = UnityEngine.Mathf.Min(tasksPerDrone, request.maxTaskCapacity);
+        }
 
         for (int droneIndex = 0; droneIndex < drones.Count; droneIndex++)
         {
@@ -61,8 +65,19 @@ public class EvenSplitScheduler : ISchedulerAlgorithm
             result.assignments.Add(assignment);
         }
 
-        result.success = true;
-        result.message = $"已按均分策略为 {result.assignments.Count} 架无人机生成任务分配";
+        int assignedTaskCount = 0;
+        foreach (DroneTaskAssignment assignment in result.assignments)
+        {
+            if (assignment != null && assignment.assignedTasks != null)
+            {
+                assignedTaskCount += assignment.assignedTasks.Count;
+            }
+        }
+
+        result.success = assignedTaskCount == tasks.Count;
+        result.message = assignedTaskCount == tasks.Count
+            ? $"已按均分策略为 {result.assignments.Count} 架无人机生成任务分配"
+            : $"均分策略受任务容量限制，仅分配 {assignedTaskCount}/{tasks.Count} 个任务";
         return result;
     }
 }

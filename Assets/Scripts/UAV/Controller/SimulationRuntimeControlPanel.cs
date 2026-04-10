@@ -1007,7 +1007,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
 
         if (simulationManager != null && simulationManager.currentState != SimulationState.Idle)
         {
-            simulationManager.SetState(SimulationState.Idle);
+            simulationManager.OnResetClicked();
         }
 
         droneManager.schedulerAlgorithm = schedulerOptions[schedulerIndex];
@@ -1946,32 +1946,19 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         int totalRunCount = Mathf.Clamp(batchExperimentRunner.batchRunCount, MinBatchRunCount, MaxBatchRunCount);
         batchStatusText.text =
             $"状态: {state}\n" +
+            $"预设: {batchExperimentRunner.ActivePresetName}\n" +
             $"进度: {batchExperimentRunner.CompletedRunCount}/{totalRunCount}  当前轮: {Mathf.Max(batchExperimentRunner.CurrentRunIndex, 0)}\n" +
             batchExperimentRunner.LastBatchMessage;
     }
 
     private string FormatSchedulerName(SchedulerAlgorithmType algorithmType)
     {
-        switch (algorithmType)
-        {
-            case SchedulerAlgorithmType.GreedyNearest:
-                return "最近优先";
-            case SchedulerAlgorithmType.EvenSplit:
-            default:
-                return "均分任务";
-        }
+        return UAVAlgorithmNames.GetSchedulerDisplayName(algorithmType);
     }
 
     private string FormatPlannerName(PathPlannerType plannerType)
     {
-        switch (plannerType)
-        {
-            case PathPlannerType.AStar:
-                return "A*";
-            case PathPlannerType.StraightLine:
-            default:
-                return "直线";
-        }
+        return UAVAlgorithmNames.GetPlannerDisplayName(plannerType);
     }
 
     private string FormatSimulationState(SimulationState state)

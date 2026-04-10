@@ -1,0 +1,24 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f1bfeb8581887a549a56bbd142a63161, type: 3}
+  m_Name: DroneConfig_Default
+  m_EditorClassIdentifier: 
+  defaultSpeed: 5
+  cruiseHeight: 5
+  minimumSeparation: 1.6
+  waitTimeout: 10
+  avoidanceTriggerDistance: 2.2
+  avoidanceResumeDistance: 1.8
+  maxTaskCapacity: 0
+  priorityWeight: 6
+  distanceWeight: 1
+  loadWeight: 4

@@ -93,11 +93,23 @@ public class SimulationResultExporter : MonoBehaviour
         hasAutoExportedCurrentRun = false;
     }
 
+    public SimulationExperimentRecord CaptureCurrentRecord(string note = "", string exportTrigger = "manual")
+    {
+        CacheReferences();
+        return BuildCurrentRecord(note, exportTrigger);
+    }
+
+    public SimulationExperimentDetailExport CaptureCurrentDetailExport(string note = "", string exportTrigger = "manual")
+    {
+        CacheReferences();
+        return BuildCurrentDetailExport(note, exportTrigger);
+    }
+
     public bool ExportCurrentResult(string note = "", bool autoTriggered = false)
     {
         CacheReferences();
 
-        SimulationExperimentRecord record = BuildCurrentRecord(
+        SimulationExperimentRecord record = CaptureCurrentRecord(
             string.IsNullOrWhiteSpace(note)
                 ? (autoTriggered ? autoExportNote : manualExportNote)
                 : note,
@@ -144,7 +156,7 @@ public class SimulationResultExporter : MonoBehaviour
     {
         CacheReferences();
 
-        SimulationExperimentDetailExport detail = BuildCurrentDetailExport(
+        SimulationExperimentDetailExport detail = CaptureCurrentDetailExport(
             string.IsNullOrWhiteSpace(note)
                 ? (autoTriggered ? autoExportNote : manualExportNote)
                 : note,
@@ -259,6 +271,62 @@ public class SimulationResultExporter : MonoBehaviour
         useCustomExportDirectory = false;
         customExportDirectory = string.Empty;
         LastExportMessage = $"已切回默认目录：{GetDefaultExportDirectoryPath()}";
+    }
+
+    public string WriteSessionManifest(BatchSessionManifest manifest)
+    {
+        if (manifest == null)
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            string directory = GetArchiveDirectoryPath();
+            Directory.CreateDirectory(directory);
+            string path = Path.Combine(directory, "session_manifest.json");
+            File.WriteAllText(path, JsonUtility.ToJson(manifest, true), new UTF8Encoding(true));
+            return path;
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"[SimulationResultExporter] 写入 session_manifest 失败: {exception.Message}");
+            return string.Empty;
+        }
+    }
+
+    public string WriteSessionSummaryCsv(IReadOnlyList<SimulationExperimentRecord> records)
+    {
+        if (records == null || records.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            string directory = GetArchiveDirectoryPath();
+            Directory.CreateDirectory(directory);
+            string path = Path.Combine(directory, "session_summary.csv");
+
+            using (StreamWriter writer = new StreamWriter(path, false, new UTF8Encoding(true)))
+            {
+                writer.WriteLine("metric,count,min,max,avg");
+                WriteMetric(writer, "elapsed_seconds", records, record => record.elapsedSeconds);
+                WriteMetric(writer, "total_flight_distance", records, record => record.totalFlightDistance);
+                WriteMetric(writer, "completed_task_count", records, record => record.completedTaskCount);
+                WriteMetric(writer, "pending_task_count", records, record => record.pendingTaskCount);
+                WriteMetric(writer, "in_progress_task_count", records, record => record.inProgressTaskCount);
+                WriteMetric(writer, "total_wait_count", records, record => record.totalWaitCount);
+                WriteMetric(writer, "total_conflict_count", records, record => record.totalConflictCount);
+            }
+
+            return path;
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"[SimulationResultExporter] 写入 session_summary 失败: {exception.Message}");
+            return string.Empty;
+        }
     }
 
     private string ResolveCsvExportPath(string directory)
@@ -668,14 +736,7 @@ public class SimulationResultExporter : MonoBehaviour
             return "-";
         }
 
-        switch (droneManager.schedulerAlgorithm)
-        {
-            case SchedulerAlgorithmType.GreedyNearest:
-                return "GreedyNearest";
-            case SchedulerAlgorithmType.EvenSplit:
-            default:
-                return "EvenSplit";
-        }
+        return UAVAlgorithmNames.GetSchedulerIdentifier(droneManager.schedulerAlgorithm);
     }
 
     private string ResolvePathPlannerName()
@@ -685,13 +746,35 @@ public class SimulationResultExporter : MonoBehaviour
             return "-";
         }
 
-        switch (droneManager.pathPlannerType)
+        return UAVAlgorithmNames.GetPlannerIdentifier(droneManager.pathPlannerType);
+    }
+
+    private void WriteMetric(
+        StreamWriter writer,
+        string metricName,
+        IReadOnlyList<SimulationExperimentRecord> records,
+        Func<SimulationExperimentRecord, float> selector)
+    {
+        float min = float.MaxValue;
+        float max = float.MinValue;
+        float total = 0f;
+
+        for (int i = 0; i < records.Count; i++)
         {
-            case PathPlannerType.AStar:
-                return "AStar";
-            case PathPlannerType.StraightLine:
-            default:
-                return "StraightLine";
+            float value = selector.Invoke(records[i]);
+            if (value < min)
+            {
+                min = value;
+            }
+
+            if (value > max)
+            {
+                max = value;
+            }
+
+            total += value;
         }
+
+        writer.WriteLine($"{metricName},{records.Count},{min:0.###},{max:0.###},{(total / records.Count):0.###}");
     }
 }

@@ -1,14 +1,17 @@
 using System.Collections;
+using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 
 /// <summary>
-/// 按当前配置连续执行多轮实验，并在每轮结束后自动导出结果。
+/// 按当前配置或实验预设连续执行多轮实验，并在每轮结束后自动导出结果。
 /// </summary>
 public class BatchExperimentRunner : MonoBehaviour
 {
     [Header("References")]
     public SimulationManager simulationManager;
     public SimulationResultExporter resultExporter;
+    public DroneManager droneManager;
 
     [Header("Batch Settings")]
     [Tooltip("单次触发时的批量实验轮数。")]
@@ -26,14 +29,25 @@ public class BatchExperimentRunner : MonoBehaviour
     [Tooltip("批量实验导出备注前缀。")]
     public string batchNotePrefix = "batch";
 
+    [Header("Experiment Preset")]
+    [Tooltip("当前批量实验预设；为空时按当前运行时配置执行。")]
+    public ExperimentPreset experimentPreset;
+
+    [Tooltip("默认实验预设的 Resources 路径；为空时不自动加载。")]
+    public string experimentPresetResourcePath = "ExperimentPresets/Density/Medium";
+
     public bool IsBatchRunning => batchCoroutine != null;
     public int CurrentRunIndex { get; private set; }
     public int CompletedRunCount { get; private set; }
     public string LastBatchMessage { get; private set; } = "未开始批量实验";
+    public string ActivePresetName => resolvedExperimentPreset != null ? resolvedExperimentPreset.presetName : "Current Runtime";
 
     private Coroutine batchCoroutine;
     private bool stopRequested;
     private bool cachedAutoExportOnCompletion;
+    private ExperimentPreset resolvedExperimentPreset;
+    private readonly List<SimulationExperimentRecord> sessionRecords = new List<SimulationExperimentRecord>();
+    private readonly List<string> exportedFiles = new List<string>();
 
     void Awake()
     {
@@ -43,6 +57,12 @@ public class BatchExperimentRunner : MonoBehaviour
     public void SetBatchRunCount(int count)
     {
         batchRunCount = Mathf.Clamp(count, 1, 50);
+    }
+
+    public void SetExperimentPreset(ExperimentPreset preset)
+    {
+        experimentPreset = preset;
+        resolvedExperimentPreset = preset;
     }
 
     public bool StartBatch()
@@ -55,9 +75,9 @@ public class BatchExperimentRunner : MonoBehaviour
             return false;
         }
 
-        if (simulationManager == null || resultExporter == null)
+        if (simulationManager == null || resultExporter == null || droneManager == null)
         {
-            LastBatchMessage = "批量实验启动失败：缺少仿真管理器或导出器";
+            LastBatchMessage = "批量实验启动失败：缺少仿真管理器、导出器或无人机管理器";
             return false;
         }
 
@@ -67,14 +87,19 @@ public class BatchExperimentRunner : MonoBehaviour
             return false;
         }
 
+        resolvedExperimentPreset = ResolvePreset();
+        ApplyResolvedPreset();
+
         stopRequested = false;
         CurrentRunIndex = 0;
         CompletedRunCount = 0;
+        sessionRecords.Clear();
+        exportedFiles.Clear();
         cachedAutoExportOnCompletion = resultExporter.autoExportOnCompletion;
         resultExporter.autoExportOnCompletion = false;
         resultExporter.BeginNewArchiveSession($"{batchNotePrefix}-{batchRunCount:D2}-runs");
         batchCoroutine = StartCoroutine(RunBatchCoroutine());
-        LastBatchMessage = $"批量实验已启动，共 {batchRunCount} 轮，归档到 {resultExporter.CurrentSessionFolderName}";
+        LastBatchMessage = $"批量实验已启动，共 {batchRunCount} 轮，预设 {ActivePresetName}，归档到 {resultExporter.CurrentSessionFolderName}";
         return true;
     }
 
@@ -109,6 +134,8 @@ public class BatchExperimentRunner : MonoBehaviour
 
                 simulationManager.OnResetClicked();
                 yield return null;
+
+                ApplyResolvedPreset();
 
                 simulationManager.OnStartClicked();
                 yield return null;
@@ -145,16 +172,24 @@ public class BatchExperimentRunner : MonoBehaviour
                 }
 
                 string note = $"{batchNotePrefix}-run-{runIndex:D2}-of-{batchRunCount:D2}";
+                SimulationExperimentRecord record = resultExporter.CaptureCurrentRecord(note, "batch");
                 bool exportedAny = false;
 
                 if (exportCsv)
                 {
                     exportedAny |= resultExporter.ExportCurrentResult(note, false);
+                    RegisterExportPath(resultExporter.LastExportPath);
                 }
 
                 if (exportJson)
                 {
                     exportedAny |= resultExporter.ExportCurrentResultAsJson(note, false);
+                    RegisterExportPath(resultExporter.LastExportPath);
+                }
+
+                if (record != null)
+                {
+                    sessionRecords.Add(record);
                 }
 
                 CompletedRunCount = runIndex;
@@ -172,6 +207,8 @@ public class BatchExperimentRunner : MonoBehaviour
         }
         finally
         {
+            WriteSessionArtifacts(aborted || stopRequested);
+
             if (resultExporter != null)
             {
                 resultExporter.autoExportOnCompletion = cachedAutoExportOnCompletion;
@@ -239,5 +276,145 @@ public class BatchExperimentRunner : MonoBehaviour
                 resultExporter = FindObjectOfType<SimulationResultExporter>();
             }
         }
+
+        if (droneManager == null)
+        {
+            droneManager = simulationManager != null ? simulationManager.droneManager : null;
+            if (droneManager == null)
+            {
+                droneManager = FindObjectOfType<DroneManager>();
+            }
+        }
+    }
+
+    private ExperimentPreset ResolvePreset()
+    {
+        if (experimentPreset != null)
+        {
+            return experimentPreset;
+        }
+
+        if (string.IsNullOrWhiteSpace(experimentPresetResourcePath))
+        {
+            return null;
+        }
+
+        experimentPreset = Resources.Load<ExperimentPreset>(experimentPresetResourcePath);
+        return experimentPreset;
+    }
+
+    private void ApplyResolvedPreset()
+    {
+        if (resolvedExperimentPreset == null || droneManager == null)
+        {
+            return;
+        }
+
+        batchRunCount = Mathf.Clamp(resolvedExperimentPreset.batchRuns, 1, 50);
+        batchNotePrefix = string.IsNullOrWhiteSpace(resolvedExperimentPreset.notePrefix)
+            ? batchNotePrefix
+            : resolvedExperimentPreset.notePrefix;
+
+        droneManager.schedulerAlgorithm = resolvedExperimentPreset.scheduler;
+        droneManager.pathPlannerType = resolvedExperimentPreset.planner;
+        droneManager.ApplyPlanningSettings(
+            droneManager.planningGridCellSize,
+            droneManager.allowDiagonalPlanning,
+            droneManager.autoConfigurePlanningObstacles,
+            resolvedExperimentPreset.planningWorldMin,
+            resolvedExperimentPreset.planningWorldMax);
+        droneManager.RespawnDrones(Mathf.Max(1, resolvedExperimentPreset.droneCount));
+    }
+
+    private void RegisterExportPath(string fullPath)
+    {
+        if (string.IsNullOrWhiteSpace(fullPath))
+        {
+            return;
+        }
+
+        string fileName = Path.GetFileName(fullPath);
+        if (!string.IsNullOrWhiteSpace(fileName) && !exportedFiles.Contains(fileName))
+        {
+            exportedFiles.Add(fileName);
+        }
+    }
+
+    private void WriteSessionArtifacts(bool stoppedEarly)
+    {
+        if (resultExporter == null || sessionRecords.Count == 0)
+        {
+            return;
+        }
+
+        string summaryPath = resultExporter.WriteSessionSummaryCsv(sessionRecords);
+        RegisterExportPath(summaryPath);
+
+        BatchSessionManifest manifest = new BatchSessionManifest
+        {
+            sessionFolderName = resultExporter.CurrentSessionFolderName ?? string.Empty,
+            generatedAt = System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+            exportDirectory = resultExporter.GetArchiveDirectoryPath(),
+            batchNotePrefix = batchNotePrefix,
+            batchRuns = batchRunCount,
+            completedRuns = CompletedRunCount,
+            stoppedEarly = stoppedEarly,
+            lastBatchMessage = LastBatchMessage,
+            preset = BuildPresetSnapshot(resolvedExperimentPreset),
+            planning = BuildPlanningSnapshot(),
+            exportedFiles = new StringListWrapper { items = exportedFiles.ToArray() }
+        };
+
+        string manifestPath = resultExporter.WriteSessionManifest(manifest);
+        RegisterExportPath(manifestPath);
+    }
+
+    private ExperimentPresetSnapshot BuildPresetSnapshot(ExperimentPreset preset)
+    {
+        if (preset == null)
+        {
+            return new ExperimentPresetSnapshot
+            {
+                presetName = "Current Runtime",
+                groupName = "runtime",
+                notePrefix = batchNotePrefix,
+                batchRuns = batchRunCount,
+                droneCount = droneManager != null ? droneManager.droneCount : 0,
+                scheduler = droneManager != null ? UAVAlgorithmNames.GetSchedulerIdentifier(droneManager.schedulerAlgorithm) : "-",
+                planner = droneManager != null ? UAVAlgorithmNames.GetPlannerIdentifier(droneManager.pathPlannerType) : "-",
+                planningWorldMin = droneManager != null ? droneManager.planningWorldMin : Vector3.zero,
+                planningWorldMax = droneManager != null ? droneManager.planningWorldMax : Vector3.zero
+            };
+        }
+
+        return new ExperimentPresetSnapshot
+        {
+            presetName = preset.presetName ?? string.Empty,
+            groupName = preset.groupName ?? string.Empty,
+            notePrefix = preset.notePrefix ?? string.Empty,
+            batchRuns = preset.batchRuns,
+            droneCount = preset.droneCount,
+            scheduler = UAVAlgorithmNames.GetSchedulerIdentifier(preset.scheduler),
+            planner = UAVAlgorithmNames.GetPlannerIdentifier(preset.planner),
+            planningWorldMin = preset.planningWorldMin,
+            planningWorldMax = preset.planningWorldMax
+        };
+    }
+
+    private PlanningSettingsSnapshot BuildPlanningSnapshot()
+    {
+        if (droneManager == null)
+        {
+            return new PlanningSettingsSnapshot();
+        }
+
+        return new PlanningSettingsSnapshot
+        {
+            gridCellSize = droneManager.planningGridCellSize,
+            allowDiagonal = droneManager.allowDiagonalPlanning,
+            autoConfigureObstacles = droneManager.autoConfigurePlanningObstacles,
+            worldMin = droneManager.planningWorldMin,
+            worldMax = droneManager.planningWorldMax
+        };
     }
 }

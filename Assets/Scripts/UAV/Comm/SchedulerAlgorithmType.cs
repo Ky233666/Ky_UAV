@@ -4,5 +4,6 @@
 public enum SchedulerAlgorithmType
 {
     EvenSplit = 0,
-    GreedyNearest = 1
+    GreedyNearest = 1,
+    PriorityGreedy = 2
 }

@@ -77,6 +77,11 @@ public class DroneStateMachine : MonoBehaviour
 
     void Start()
     {
+        if (DroneManager.Instance != null)
+        {
+            ApplyConfigDefaults(DroneManager.Instance.ResolveDroneConfig());
+        }
+
         // 初始状态
         ChangeState(DroneState.Idle);
     }
@@ -323,17 +328,9 @@ public class DroneStateMachine : MonoBehaviour
         if (waitTimer >= waitTimeout)
         {
             Debug.LogWarning($"[DroneStateMachine] {droneController?.droneName} 等待超时，强制继续");
-            // 超时后可以强制继续，或者切换到其他状态
-            ClearActiveConflict();
-            ChangeState(DroneState.Moving);
+            ResumeMoving();
             return;
         }
-
-        // TODO: 这里可以添加冲突检测逻辑
-        // 例如：检测前方是否有其他无人机，是否有障碍物等
-        // 如果冲突解除，切换回 Moving
-
-        // 示例：手动解除等待（通过外部调用）
     }
 
     /// <summary>
@@ -341,8 +338,7 @@ public class DroneStateMachine : MonoBehaviour
     /// </summary>
     private void UpdateFinishedState()
     {
-        // 保持在 Finished 状态
-        // TODO: 可以添加重置逻辑，允许重新开始任务
+        // 保持在 Finished 状态，重置由 SimulationManager/DroneController 统一触发。
     }
 
     #endregion
@@ -383,11 +379,29 @@ public class DroneStateMachine : MonoBehaviour
         ChangeState(DroneState.Moving);
     }
 
+    public void ApplyConfigDefaults(DroneConfig config)
+    {
+        if (config == null)
+        {
+            return;
+        }
+
+        waitTimeout = Mathf.Max(0.1f, config.waitTimeout);
+        avoidanceTriggerDistance = Mathf.Max(0.1f, config.avoidanceTriggerDistance);
+        avoidanceResumeDistance = Mathf.Max(avoidanceTriggerDistance, config.avoidanceResumeDistance);
+        minimumSeparationDistance = Mathf.Max(0.1f, config.minimumSeparation);
+    }
+
     /// <summary>
     /// 重置状态机
     /// </summary>
     public void Reset()
     {
+        if (DroneManager.Instance != null)
+        {
+            ApplyConfigDefaults(DroneManager.Instance.ResolveDroneConfig());
+        }
+
         if (droneData != null)
         {
             droneData.currentTaskIndex = 0;
@@ -408,6 +422,7 @@ public class DroneStateMachine : MonoBehaviour
             droneController.ClearTarget();
         }
 
+        waitTimer = 0f;
         ClearActiveConflict();
         ChangeState(DroneState.Idle);
     }

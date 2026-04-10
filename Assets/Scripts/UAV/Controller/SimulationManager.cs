@@ -192,6 +192,11 @@ public class SimulationManager : MonoBehaviour
             return;
         }
 
+        if (currentState != SimulationState.Idle)
+        {
+            OnResetClicked();
+        }
+
         ResetAllTaskPointsInScene();
         elapsedSimulationTime = 0f;
 
@@ -201,8 +206,14 @@ public class SimulationManager : MonoBehaviour
             var allTasks = GetAvailableTasks();
             if (allTasks.Length > 0)
             {
-                droneManager.AutoAssignTasks(allTasks);
+                SchedulingResult schedulingResult = droneManager.AutoAssignTasks(allTasks);
                 Debug.Log($"[SimulationManager] 已分配 {allTasks.Length} 个任务点给无人机");
+                if (!schedulingResult.success)
+                {
+                    ShowStatusMessage($"状态：{schedulingResult.message}");
+                    SetState(SimulationState.Idle);
+                    return;
+                }
             }
             else
             {

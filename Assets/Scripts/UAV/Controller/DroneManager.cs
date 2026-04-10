@@ -13,6 +13,13 @@ public class DroneManager : MonoBehaviour
     [Tooltip("无人机 Prefab")]
     public DroneController dronePrefab;
 
+    [Header("配置")]
+    [Tooltip("默认配置资产；为空时将尝试从 Resources/Configs/DroneConfig_Default 加载。")]
+    public DroneConfig droneConfig;
+
+    [Tooltip("默认配置的 Resources 路径。")]
+    public string droneConfigResourcePath = "Configs/DroneConfig_Default";
+
     [Header("生成设置")]
     [Tooltip("无人机数量")]
     public int droneCount = 4;
@@ -29,6 +36,9 @@ public class DroneManager : MonoBehaviour
     [Tooltip("优先使用场景中的 SpawnPoint 作为起飞位置；不足时再回退到 spawnOrigin 阵列")]
     public bool useSceneSpawnPoints = true;
 
+    [Tooltip("默认巡航高度（世界坐标 Y）。")]
+    public float cruiseHeight = 5f;
+
     [Header("管理")]
     [Tooltip("所有无人机列表")]
     public List<DroneController> drones = new List<DroneController>();
@@ -42,6 +52,9 @@ public class DroneManager : MonoBehaviour
 
     [Tooltip("无人机之间的最小中心距离。")]
     public float minimumDroneSeparation = 1.6f;
+
+    [Tooltip("单机最大任务容量。0 表示不限制。")]
+    public int maxTaskCapacity = 0;
 
     [Tooltip("分离修正强度，越大越快把重叠机体推开。")]
     [Range(0.1f, 1f)]
@@ -103,6 +116,7 @@ public class DroneManager : MonoBehaviour
 
     void Start()
     {
+        ApplyConfiguredDefaults();
         EnsurePlanningObstacleLayerConfigured();
 
         if (autoConfigurePlanningObstacles)
@@ -115,6 +129,37 @@ public class DroneManager : MonoBehaviour
         {
             SpawnDrones(droneCount);
         }
+    }
+
+    public DroneConfig ResolveDroneConfig()
+    {
+        if (droneConfig == null && !string.IsNullOrWhiteSpace(droneConfigResourcePath))
+        {
+            droneConfig = Resources.Load<DroneConfig>(droneConfigResourcePath);
+        }
+
+        return droneConfig;
+    }
+
+    public void ApplyConfiguredDefaults()
+    {
+        DroneConfig config = ResolveDroneConfig();
+        if (config == null)
+        {
+            return;
+        }
+
+        cruiseHeight = Mathf.Max(0f, config.cruiseHeight);
+        minimumDroneSeparation = Mathf.Max(0.1f, config.minimumSeparation);
+        maxTaskCapacity = Mathf.Max(0, config.maxTaskCapacity);
+
+        if (dronePrefab != null)
+        {
+            dronePrefab.speed = Mathf.Max(0.1f, config.defaultSpeed);
+        }
+
+        ApplyDroneSpeedToAll(config.defaultSpeed);
+        ApplyConfigToRuntimeObjects(config);
     }
 
     /// <summary>
@@ -134,7 +179,7 @@ public class DroneManager : MonoBehaviour
 
         for (int i = 0; i < count; i++)
         {
-            Vector3 position = spawnPositions[i];
+            Vector3 position = AdjustSpawnHeight(spawnPositions[i]);
 
             // 实例化
             GameObject go = Instantiate(dronePrefab.gameObject, position, Quaternion.identity);
@@ -181,6 +226,7 @@ public class DroneManager : MonoBehaviour
             }
         }
 
+        ApplyConfiguredDefaults();
         BindCamerasToManagedDrones();
         Debug.Log($"[DroneManager] 已生成 {count} 架无人机");
     }
@@ -388,7 +434,10 @@ public class DroneManager : MonoBehaviour
             tasks = allTasks.Where(task => task != null).ToList(),
             sortByPriority = false,
             fallbackSpawnOrigin = spawnOrigin,
-            priorityWeight = 5f
+            priorityWeight = ResolveDroneConfig() != null ? ResolveDroneConfig().priorityWeight : 6f,
+            distanceWeight = ResolveDroneConfig() != null ? ResolveDroneConfig().distanceWeight : 1f,
+            loadWeight = ResolveDroneConfig() != null ? ResolveDroneConfig().loadWeight : 4f,
+            maxTaskCapacity = maxTaskCapacity
         };
 
         ISchedulerAlgorithm scheduler = CreateSchedulerAlgorithm();
@@ -421,6 +470,9 @@ public class DroneManager : MonoBehaviour
     {
         switch (schedulerAlgorithm)
         {
+            case SchedulerAlgorithmType.PriorityGreedy:
+                return new PriorityGreedyScheduler();
+
             case SchedulerAlgorithmType.GreedyNearest:
                 return new GreedyNearestScheduler();
 
@@ -438,6 +490,9 @@ public class DroneManager : MonoBehaviour
     {
         switch (pathPlannerType)
         {
+            case PathPlannerType.RRT:
+                return new RRTPlanner();
+
             case PathPlannerType.AStar:
                 return new AStarPlanner();
 
@@ -474,11 +529,15 @@ public class DroneManager : MonoBehaviour
         }
 
         IPathPlanner planner = CreatePathPlanner();
+        Vector3 startPosition = drone.transform.position;
+        startPosition.y = cruiseHeight;
+        Vector3 targetPosition = taskPoint.transform.position;
+        targetPosition.y = cruiseHeight;
         PathPlanningRequest request = new PathPlanningRequest
         {
             droneId = droneId,
-            startPosition = drone.transform.position,
-            targetPosition = taskPoint.transform.position,
+            startPosition = startPosition,
+            targetPosition = targetPosition,
             gridCellSize = planningGridCellSize,
             worldMin = planningWorldMin,
             worldMax = planningWorldMax,
@@ -743,6 +802,35 @@ public class DroneManager : MonoBehaviour
         }
 
         return positions;
+    }
+
+    private Vector3 AdjustSpawnHeight(Vector3 position)
+    {
+        return new Vector3(position.x, Mathf.Max(position.y, cruiseHeight), position.z);
+    }
+
+    private void ApplyConfigToRuntimeObjects(DroneConfig config)
+    {
+        if (config == null)
+        {
+            return;
+        }
+
+        foreach (DroneController drone in drones)
+        {
+            if (drone != null)
+            {
+                drone.speed = Mathf.Max(0.1f, config.defaultSpeed);
+            }
+        }
+
+        foreach (DroneStateMachine stateMachine in GetComponentsInChildren<DroneStateMachine>(true))
+        {
+            if (stateMachine != null)
+            {
+                stateMachine.ApplyConfigDefaults(config);
+            }
+        }
     }
 
     private List<Transform> GetSceneSpawnPoints()

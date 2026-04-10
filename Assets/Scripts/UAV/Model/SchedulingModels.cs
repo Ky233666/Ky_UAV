@@ -32,6 +32,23 @@ public class SchedulingRequest
     /// 数值越大，越倾向先分配高优先级任务。
     /// </summary>
     public float priorityWeight = 5f;
+
+    /// <summary>
+    /// 任务距离对贪心评分的影响权重。
+    /// 数值越大，越倾向优先选择更近的任务。
+    /// </summary>
+    public float distanceWeight = 1f;
+
+    /// <summary>
+    /// 已分配任务数量对贪心评分的影响权重。
+    /// 数值越大，越倾向把任务继续分散到负载更低的无人机。
+    /// </summary>
+    public float loadWeight = 4f;
+
+    /// <summary>
+    /// 单机最大任务容量。0 表示不限制。
+    /// </summary>
+    public int maxTaskCapacity = 0;
 }
 
 /// <summary>
