@@ -8,7 +8,7 @@
 ## 2. 预设
 - 预设资源目录：`Assets/Resources/ExperimentPresets`
 - 默认密度预设：`ExperimentPresets/Density/Medium`
-- 预设由 `BatchExperimentRunner` 自动加载，也可在 Inspector 中手工指定。
+- 预设由 `BatchExperimentRunner` 自动加载，也可直接在运行时实验中心切换，无需回 Inspector。
 
 ## 3. 执行顺序
 1. 调度对比

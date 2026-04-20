@@ -41,6 +41,7 @@ public class BatchExperimentRunner : MonoBehaviour
     public int CompletedRunCount { get; private set; }
     public string LastBatchMessage { get; private set; } = "未开始批量实验";
     public string ActivePresetName => resolvedExperimentPreset != null ? resolvedExperimentPreset.presetName : "Current Runtime";
+    public ExperimentPreset ActivePreset => resolvedExperimentPreset != null ? resolvedExperimentPreset : experimentPreset;
 
     private Coroutine batchCoroutine;
     private bool stopRequested;
@@ -63,6 +64,17 @@ public class BatchExperimentRunner : MonoBehaviour
     {
         experimentPreset = preset;
         resolvedExperimentPreset = preset;
+        if (preset != null)
+        {
+            experimentPresetResourcePath = string.Empty;
+        }
+    }
+
+    public void UseCurrentRuntimeConfiguration()
+    {
+        experimentPreset = null;
+        resolvedExperimentPreset = null;
+        experimentPresetResourcePath = string.Empty;
     }
 
     public bool StartBatch()

@@ -16,6 +16,7 @@
 - CSV/JSON 单次导出与批量实验导出
 - session 级 `session_manifest.json` 与 `session_summary.csv`
 - 面向打包版的运行时控制面板
+- 运行时实验中心：预设分组浏览、实验矩阵切换、预设应用、预设批量与当前配置批量运行
 
 当前阶段不继续扩展联网、强化学习、复杂动力学等高风险内容。
 
@@ -68,6 +69,7 @@
 - 总览/跟随/下一架无人机切换
 - 导出目录切换
 - 批量实验启动/停止与预设状态显示
+- 实验中心内按分组浏览 `Scheduling / Planning / Scaling / Density` 预设并直接启动
 
 ## 实验导出
 
@@ -103,4 +105,3 @@
 - 稳定性记录：[Assets/Docs/StabilityTestRecord.md](/D:/unityhub/project/Ky_UAV/Assets/Docs/StabilityTestRecord.md)
 - 实验执行说明：[Assets/Docs/ExperimentExecutionGuide.md](/D:/unityhub/project/Ky_UAV/Assets/Docs/ExperimentExecutionGuide.md)
 - 答辩演示脚本：[Assets/Docs/DefenseDemoScript.md](/D:/unityhub/project/Ky_UAV/Assets/Docs/DefenseDemoScript.md)
-- 最终交付说明：[Assets/Docs/FinalDefenseDeliverySpec.md](/D:/unityhub/project/Ky_UAV/Assets/Docs/FinalDefenseDeliverySpec.md)

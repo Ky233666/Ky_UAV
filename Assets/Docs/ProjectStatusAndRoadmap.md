@@ -12,6 +12,10 @@
 > - 已补 `ProjectSmokeValidator` 与 `KyUavDeliveryAssetTools` 两个编辑器入口。
 > - 已补 `EditMode` 测试与交付文档集。
 > - batchmode 实跑验证已完成：资产初始化通过、主场景烟雾验证通过、EditMode 自动化测试 `6/6` 通过。
+>
+> 2026-04-20 文档与运行时入口更新：
+> - 已删除过时且重复的 `FinalDefenseDeliverySpec.md`，统一以 `README.md`、`ExecutionPlan.md`、本文、测试记录和实验说明作为仓库文档入口。
+> - 运行时控制面板已扩展为实验中心，支持预设分组浏览、实验矩阵快捷切换、预设应用和按预设批量运行。
 
 ---
 
