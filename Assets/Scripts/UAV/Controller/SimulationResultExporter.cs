@@ -512,7 +512,7 @@ public class SimulationResultExporter : MonoBehaviour
             simulationState = simulationManager.currentState.ToString(),
             schedulerAlgorithm = ResolveSchedulerAlgorithmName(),
             pathPlanner = ResolvePathPlannerName(),
-            cameraMode = cameraManager != null ? (cameraManager.isOverview ? "Overview" : "Follow") : "Unknown",
+            cameraMode = cameraManager != null ? cameraManager.GetCurrentModeIdentifier() : "Unknown",
             cameraTarget = cameraManager != null && cameraManager.targetDrone != null
                 ? cameraManager.targetDrone.name
                 : "-",

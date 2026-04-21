@@ -63,6 +63,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     private static readonly Color SecondaryButtonColor = new Color(0.18f, 0.28f, 0.36f, 0.98f);
     private static readonly Color PositiveButtonColor = new Color(0.08f, 0.58f, 0.42f, 0.98f);
     private static readonly Color NegativeButtonColor = new Color(0.37f, 0.42f, 0.48f, 0.98f);
+    private static readonly Color QuitButtonColor = new Color(0.62f, 0.24f, 0.24f, 0.98f);
 
     private RectTransform panelRoot;
     private RectTransform bodyRoot;
@@ -153,6 +154,8 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
             ApplyExpandState();
             return;
         }
+
+        HandleRuntimeShortcuts();
 
         if (Time.unscaledTime >= nextSummaryRefreshTime)
         {
@@ -285,13 +288,26 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         title.rectTransform.anchoredPosition = new Vector2(4f, 0f);
         title.rectTransform.sizeDelta = new Vector2(120f, 24f);
 
-        Button expandButton = CreateActionButton(header, "Expand", SecondaryButtonColor, ToggleExpanded, 70f);
+        Button expandButton = CreateActionButton(header, "Expand", SecondaryButtonColor, ToggleExpanded, 64f);
         RectTransform expandRect = expandButton.GetComponent<RectTransform>();
         expandRect.anchorMin = new Vector2(1f, 0.5f);
         expandRect.anchorMax = new Vector2(1f, 0.5f);
         expandRect.pivot = new Vector2(1f, 0.5f);
         expandRect.anchoredPosition = new Vector2(-4f, 0f);
         expandButtonText = expandButton.GetComponentInChildren<TMP_Text>();
+
+        Button quitButton = CreateActionButton(header, "Quit", QuitButtonColor, RequestQuitApplication, 64f);
+        RectTransform quitRect = quitButton.GetComponent<RectTransform>();
+        quitRect.anchorMin = new Vector2(1f, 0.5f);
+        quitRect.anchorMax = new Vector2(1f, 0.5f);
+        quitRect.pivot = new Vector2(1f, 0.5f);
+        quitRect.anchoredPosition = new Vector2(-74f, 0f);
+
+        TMP_Text quitButtonLabel = quitButton.GetComponentInChildren<TMP_Text>();
+        if (quitButtonLabel != null)
+        {
+            quitButtonLabel.text = "退出";
+        }
 
         RectTransform summaryCard = CreatePanelArea("Summary", panelRoot, new Vector2(12f, -50f), new Vector2(-12f, -108f));
         ConfigureSection(summaryCard, SectionColor);
@@ -499,6 +515,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         {
             new ButtonAction("总览", SecondaryButtonColor, SwitchToOverviewCamera, 52f),
             new ButtonAction("跟随", PrimaryButtonColor, SwitchToFollowCamera, 52f),
+            new ButtonAction("2D俯视", new Color(0.10f, 0.48f, 0.62f, 0.98f), SwitchToTopDownCamera, 64f),
             new ButtonAction("下一架", PrimaryButtonColor, FocusNextDrone, 60f)
         });
         CreateStepperRow(content, "跟随高", out followHeightValueText, OnDecreaseFollowHeightClicked, OnIncreaseFollowHeightClicked);
@@ -668,7 +685,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
 
         if (footerText != null)
         {
-            footerText.text = transientMessage;
+            footerText.text = $"{transientMessage}  |  F5开始/继续 F6暂停 F7重置 F8重建 F10退出 Ctrl+Shift+C/J/B/X 导出/批量";
         }
 
         RefreshExportDirectoryUi(false);
@@ -688,6 +705,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         int completedTaskCount = CountTasksByState(taskPoints, TaskState.Completed);
         int waitingDroneCount = CountDronesByState(DroneState.Waiting);
         int totalConflictCount = CountTotalConflictEvents();
+        int buildingWarningCount = droneManager != null ? droneManager.GetBuildingWarningCount() : 0;
         int spawnPointCount = spawnPointManager != null ? spawnPointManager.GetSpawnPointCount() : 0;
         string simulationState = simulationManager != null ? FormatSimulationState(simulationManager.currentState) : "未知";
         string elapsedTime = simulationManager != null ? FormatDuration(simulationManager.ElapsedSimulationTime) : "--:--";
@@ -696,13 +714,13 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
 
         if (cameraManager != null)
         {
-            cameraMode = cameraManager.isOverview ? "总览" : "跟随";
+            cameraMode = cameraManager.GetCurrentModeDisplayName();
             cameraTarget = cameraManager.targetDrone != null ? cameraManager.targetDrone.name : "-";
         }
 
         summaryText.text =
             $"状态 {simulationState}  用时 {elapsedTime}  任务 {completedTaskCount}/{totalTaskCount}\n" +
-            $"镜头 {cameraMode}  目标 {cameraTarget}  等待 {waitingDroneCount}  冲突 {totalConflictCount}  机群 {droneCount}  起点 {spawnPointCount}";
+            $"镜头 {cameraMode}  目标 {cameraTarget}  等待 {waitingDroneCount}  冲突 {totalConflictCount}  建筑告警 {buildingWarningCount}  机群 {droneCount}  起点 {spawnPointCount}";
 
         RefreshStats(taskPoints, cameraTarget);
     }
@@ -713,6 +731,109 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         ApplyExpandState();
         transientMessage = isExpanded ? "已展开运行面板" : "已收起运行面板";
         RefreshAllLabels();
+    }
+
+    private void HandleRuntimeShortcuts()
+    {
+        bool inputFocused = exportDirectoryInputField != null && exportDirectoryInputField.isFocused;
+        bool ctrlHeld = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+        bool shiftHeld = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+        bool quitRequested =
+            Input.GetKeyDown(KeyCode.F10) ||
+            (ctrlHeld && Input.GetKeyDown(KeyCode.Q));
+
+        if (quitRequested)
+        {
+            if (inputFocused)
+            {
+                return;
+            }
+
+            RequestQuitApplication();
+            return;
+        }
+
+        if (inputFocused)
+        {
+            return;
+        }
+
+        if (ctrlHeld && shiftHeld)
+        {
+            if (Input.GetKeyDown(KeyCode.C))
+            {
+                ExportCurrentResultToCsv();
+                return;
+            }
+
+            if (Input.GetKeyDown(KeyCode.J))
+            {
+                ExportCurrentResultToJson();
+                return;
+            }
+
+            if (Input.GetKeyDown(KeyCode.B))
+            {
+                StartBatchExperiments();
+                return;
+            }
+
+            if (Input.GetKeyDown(KeyCode.X))
+            {
+                StopBatchExperiments();
+                return;
+            }
+
+            if (Input.GetKeyDown(KeyCode.N))
+            {
+                StartNewExportSession();
+                return;
+            }
+        }
+
+        if (simulationManager != null && Input.GetKeyDown(KeyCode.F5))
+        {
+            simulationManager.OnStartClicked();
+            transientMessage = "已通过快捷键触发开始/继续";
+            RefreshAllLabels();
+            RefreshSummary();
+            return;
+        }
+
+        if (simulationManager != null && Input.GetKeyDown(KeyCode.F6))
+        {
+            simulationManager.OnPauseClicked();
+            transientMessage = "已通过快捷键触发暂停";
+            RefreshAllLabels();
+            RefreshSummary();
+            return;
+        }
+
+        if (simulationManager != null && Input.GetKeyDown(KeyCode.F7))
+        {
+            simulationManager.OnResetClicked();
+            transientMessage = "已通过快捷键触发重置";
+            RefreshAllLabels();
+            RefreshSummary();
+            return;
+        }
+
+        if (Input.GetKeyDown(KeyCode.F8))
+        {
+            RebuildFleet();
+        }
+    }
+
+    private void RequestQuitApplication()
+    {
+        transientMessage = "正在退出应用";
+        RefreshAllLabels();
+
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
     }
 
     private void ApplyExpandState()
@@ -1358,6 +1479,19 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
 
         cameraManager.SwitchToFollow();
         transientMessage = "已切到跟随视角";
+        RefreshAllLabels();
+        RefreshSummary();
+    }
+
+    private void SwitchToTopDownCamera()
+    {
+        if (cameraManager == null)
+        {
+            return;
+        }
+
+        cameraManager.SwitchToTopDown2D();
+        transientMessage = "已切到2D俯视轨迹视图";
         RefreshAllLabels();
         RefreshSummary();
     }
@@ -2500,6 +2634,14 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
                     continue;
                 }
 
+                bool hasBuildingAlert = false;
+                DroneController drone = droneManager.GetDrone(data.droneId);
+                if (drone != null)
+                {
+                    DronePathVisualizer visualizer = drone.GetComponent<DronePathVisualizer>();
+                    hasBuildingAlert = visualizer != null && visualizer.HasBuildingAlert;
+                }
+
                 int assignedTaskCount = data.taskQueue != null ? data.taskQueue.Length : 0;
                 builder.Append('[').Append(data.droneId.ToString("D2")).Append("] ")
                     .Append(FormatDroneState(data.state))
@@ -2516,6 +2658,11 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
                 if (data.state == DroneState.Waiting && !string.IsNullOrWhiteSpace(data.waitReason))
                 {
                     builder.Append(" | ").Append(data.waitReason);
+                }
+
+                if (hasBuildingAlert)
+                {
+                    builder.Append(" | 建筑告警");
                 }
 
                 if (i < droneManager.droneDataList.Count - 1)

@@ -14,6 +14,14 @@ public class DronePathVisualizer : MonoBehaviour
     public bool showPlannedPath = true;
     public bool showTrail = true;
 
+    [Header("Projection")]
+    public bool useTopDownProjection = false;
+    public float topDownProjectionHeight = 12f;
+
+    [Header("Top Down Alerts")]
+    public Color buildingAlertColor = new Color(1f, 0.22f, 0.22f, 0.98f);
+    public float alertWidthMultiplier = 1.35f;
+
     [Header("Planned Path")]
     public Color plannedPathColor = new Color(0.2f, 0.9f, 1f, 0.95f);
     public float plannedPathWidth = 0.18f;
@@ -24,9 +32,17 @@ public class DronePathVisualizer : MonoBehaviour
     public float trailPointSpacing = 0.5f;
     public int maxTrailPoints = 256;
 
-    private readonly List<Vector3> trailPoints = new List<Vector3>();
+    private readonly List<Vector3> trailWorldPoints = new List<Vector3>();
+    private readonly List<Vector3> inspectionPoints = new List<Vector3>();
     private LineRenderer plannedPathRenderer;
     private LineRenderer trailRenderer;
+    private bool hasBuildingOverlapAlert;
+    private bool hasBuildingCrossingAlert;
+    private bool lastLoggedBuildingAlertState;
+
+    public bool HasBuildingAlert => hasBuildingOverlapAlert || hasBuildingCrossingAlert;
+    public bool HasBuildingOverlapAlert => hasBuildingOverlapAlert;
+    public bool HasBuildingCrossingAlert => hasBuildingCrossingAlert;
 
     void Awake()
     {
@@ -53,14 +69,16 @@ public class DronePathVisualizer : MonoBehaviour
 
         UpdatePlannedPathRenderer();
         UpdateTrailRenderer();
+        EvaluateBuildingAlerts();
+        ApplyDynamicStyle();
     }
 
     public void ResetVisuals()
     {
-        trailPoints.Clear();
+        trailWorldPoints.Clear();
         if (droneController != null)
         {
-            trailPoints.Add(droneController.transform.position + Vector3.up * 0.06f);
+            trailWorldPoints.Add(droneController.transform.position);
         }
 
         if (plannedPathRenderer != null)
@@ -70,13 +88,16 @@ public class DronePathVisualizer : MonoBehaviour
 
         if (trailRenderer != null)
         {
-            trailRenderer.positionCount = trailPoints.Count;
-            if (trailPoints.Count > 0)
+            trailRenderer.positionCount = trailWorldPoints.Count;
+            if (trailWorldPoints.Count > 0)
             {
-                trailRenderer.SetPosition(0, trailPoints[0]);
+                trailRenderer.SetPosition(0, BuildDisplayPoint(trailWorldPoints[0], 0.06f));
             }
         }
 
+        hasBuildingOverlapAlert = false;
+        hasBuildingCrossingAlert = false;
+        lastLoggedBuildingAlertState = false;
         ApplyVisibility();
     }
 
@@ -85,6 +106,12 @@ public class DronePathVisualizer : MonoBehaviour
         showPlannedPath = plannedVisible;
         showTrail = trailVisible;
         ApplyVisibility();
+    }
+
+    public void SetProjectionMode(bool enabled, float projectionHeight)
+    {
+        useTopDownProjection = enabled;
+        topDownProjectionHeight = projectionHeight;
     }
 
     private void EnsureRenderers()
@@ -156,11 +183,11 @@ public class DronePathVisualizer : MonoBehaviour
         int startIndex = Mathf.Clamp(droneData.currentWaypointIndex, 0, droneData.plannedPath.Count - 1);
         int pointCount = 1 + (droneData.plannedPath.Count - startIndex);
         plannedPathRenderer.positionCount = pointCount;
-        plannedPathRenderer.SetPosition(0, droneController.transform.position + Vector3.up * 0.12f);
+        plannedPathRenderer.SetPosition(0, BuildDisplayPoint(droneController.transform.position, 0.12f));
 
         for (int i = startIndex; i < droneData.plannedPath.Count; i++)
         {
-            plannedPathRenderer.SetPosition(i - startIndex + 1, droneData.plannedPath[i] + Vector3.up * 0.12f);
+            plannedPathRenderer.SetPosition(i - startIndex + 1, BuildDisplayPoint(droneData.plannedPath[i], 0.12f));
         }
     }
 
@@ -177,24 +204,112 @@ public class DronePathVisualizer : MonoBehaviour
             return;
         }
 
-        Vector3 currentPosition = droneController.transform.position + Vector3.up * 0.06f;
-        if (trailPoints.Count == 0)
+        Vector3 currentPosition = droneController.transform.position;
+        if (trailWorldPoints.Count == 0)
         {
-            trailPoints.Add(currentPosition);
+            trailWorldPoints.Add(currentPosition);
         }
-        else if (Vector3.Distance(trailPoints[trailPoints.Count - 1], currentPosition) >= trailPointSpacing)
+        else if (Vector3.Distance(trailWorldPoints[trailWorldPoints.Count - 1], currentPosition) >= trailPointSpacing)
         {
-            trailPoints.Add(currentPosition);
-            if (trailPoints.Count > maxTrailPoints)
+            trailWorldPoints.Add(currentPosition);
+            if (trailWorldPoints.Count > maxTrailPoints)
             {
-                trailPoints.RemoveAt(0);
+                trailWorldPoints.RemoveAt(0);
             }
         }
 
-        trailRenderer.positionCount = trailPoints.Count;
-        for (int i = 0; i < trailPoints.Count; i++)
+        trailRenderer.positionCount = trailWorldPoints.Count;
+        for (int i = 0; i < trailWorldPoints.Count; i++)
         {
-            trailRenderer.SetPosition(i, trailPoints[i]);
+            trailRenderer.SetPosition(i, BuildDisplayPoint(trailWorldPoints[i], 0.06f));
+        }
+    }
+
+    private Vector3 BuildDisplayPoint(Vector3 worldPoint, float worldOffsetY)
+    {
+        if (useTopDownProjection)
+        {
+            return new Vector3(worldPoint.x, topDownProjectionHeight + worldOffsetY, worldPoint.z);
+        }
+
+        return worldPoint + Vector3.up * worldOffsetY;
+    }
+
+    private void EvaluateBuildingAlerts()
+    {
+        hasBuildingOverlapAlert = false;
+        hasBuildingCrossingAlert = false;
+
+        if (!useTopDownProjection || DroneManager.Instance == null || droneController == null)
+        {
+            return;
+        }
+
+        hasBuildingOverlapAlert = DroneManager.Instance.IsPointInsideObstacleFootprint(droneController.transform.position);
+
+        inspectionPoints.Clear();
+        inspectionPoints.Add(droneController.transform.position);
+
+        if (droneData != null && droneData.plannedPath != null && droneData.plannedPath.Count > 0)
+        {
+            int startIndex = Mathf.Clamp(droneData.currentWaypointIndex, 0, droneData.plannedPath.Count - 1);
+            for (int i = startIndex; i < droneData.plannedPath.Count; i++)
+            {
+                inspectionPoints.Add(droneData.plannedPath[i]);
+            }
+        }
+
+        if (inspectionPoints.Count > 1 && DroneManager.Instance.DoesPolylineCrossObstacleFootprint(inspectionPoints))
+        {
+            hasBuildingCrossingAlert = true;
+            return;
+        }
+
+        if (trailWorldPoints.Count > 1 && DroneManager.Instance.DoesPolylineCrossObstacleFootprint(trailWorldPoints))
+        {
+            hasBuildingCrossingAlert = true;
+        }
+
+        bool hasAlert = HasBuildingAlert;
+        if (hasAlert != lastLoggedBuildingAlertState)
+        {
+            lastLoggedBuildingAlertState = hasAlert;
+            if (hasAlert)
+            {
+                string reason = hasBuildingOverlapAlert ? "当前位置进入建筑投影" : "轨迹穿越建筑投影";
+                Debug.LogWarning($"[DronePathVisualizer] {droneController.droneName} 触发建筑告警：{reason}");
+            }
+            else if (droneController != null)
+            {
+                Debug.Log($"[DronePathVisualizer] {droneController.droneName} 已解除建筑告警");
+            }
+        }
+    }
+
+    private void ApplyDynamicStyle()
+    {
+        bool useAlertStyle = HasBuildingAlert;
+
+        if (plannedPathRenderer != null)
+        {
+            Color plannedColor = useAlertStyle ? buildingAlertColor : plannedPathColor;
+            plannedPathRenderer.startColor = plannedColor;
+            plannedPathRenderer.endColor = plannedColor;
+
+            float width = plannedPathWidth * (useAlertStyle ? alertWidthMultiplier : 1f);
+            plannedPathRenderer.startWidth = width;
+            plannedPathRenderer.endWidth = width;
+        }
+
+        if (trailRenderer != null)
+        {
+            Color currentTrailColor = useAlertStyle ? buildingAlertColor : trailColor;
+            trailRenderer.startColor = currentTrailColor;
+            trailRenderer.endColor = currentTrailColor;
+
+            float width = trailWidth * (useAlertStyle ? alertWidthMultiplier : 1f);
+            trailRenderer.startWidth = width;
+            trailRenderer.endWidth = width;
         }
     }
 

@@ -38296,6 +38296,7 @@ MonoBehaviour:
   droneController: {fileID: 0}
   droneManager: {fileID: 1947066137}
   resultExporter: {fileID: 0}
+  batchExperimentRunner: {fileID: 0}
   autoImportTasksWhenMissing: 1
   statusText: {fileID: 732617513}
   startButton: {fileID: 1600789687}
@@ -45958,15 +45959,19 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   dronePrefab: {fileID: 5134300336799065183, guid: 75bc37a5a0e677b47915f64a0b352c99, type: 3}
+  droneConfig: {fileID: 0}
+  droneConfigResourcePath: Configs/DroneConfig_Default
   droneCount: 4
   spawnOrigin: {x: 0, y: 0, z: 0}
   spawnSpacing: 3
   spawnDirection: {x: 1, y: 0, z: 0}
   useSceneSpawnPoints: 1
+  cruiseHeight: 5
   drones: []
   droneDataList: []
   enforceDroneSeparation: 1
   minimumDroneSeparation: 1.6
+  maxTaskCapacity: 0
   separationResolveFactor: 0.85
   schedulerAlgorithm: 0
   pathPlannerType: 1

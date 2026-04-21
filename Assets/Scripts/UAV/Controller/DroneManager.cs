@@ -9,6 +9,11 @@ public class DroneManager : MonoBehaviour
 {
     public static DroneManager Instance { get; private set; }
 
+    private bool projectPathsToTopDown;
+    private float pathProjectionHeight = 12f;
+    private readonly List<Bounds> obstacleFootprintBounds = new List<Bounds>();
+    private bool obstacleFootprintCacheInitialized;
+
     [Header("无人机 Prefab")]
     [Tooltip("无人机 Prefab")]
     public DroneController dronePrefab;
@@ -123,6 +128,8 @@ public class DroneManager : MonoBehaviour
         {
             ConfigurePlanningObstacles();
         }
+
+        RefreshObstacleFootprintCache();
 
         // 自动生成无人机（如果需要）
         if (drones.Count == 0 && dronePrefab != null)
@@ -353,6 +360,8 @@ public class DroneManager : MonoBehaviour
         {
             ConfigurePlanningObstacles();
         }
+
+        RefreshObstacleFootprintCache();
     }
 
     void LateUpdate()
@@ -391,7 +400,133 @@ public class DroneManager : MonoBehaviour
             }
 
             pathVisualizer.SetVisibility(showPlannedPath, showTrail);
+            pathVisualizer.SetProjectionMode(projectPathsToTopDown, pathProjectionHeight);
         }
+    }
+
+    public void SetPathProjectionMode(bool projectToTopDown, float projectionHeight)
+    {
+        projectPathsToTopDown = projectToTopDown;
+        pathProjectionHeight = projectionHeight;
+
+        foreach (DroneController drone in drones)
+        {
+            if (drone == null)
+            {
+                continue;
+            }
+
+            DronePathVisualizer pathVisualizer = drone.GetComponent<DronePathVisualizer>();
+            if (pathVisualizer == null)
+            {
+                pathVisualizer = drone.gameObject.AddComponent<DronePathVisualizer>();
+                pathVisualizer.droneController = drone;
+                pathVisualizer.droneData = GetDroneData(drone.droneId);
+            }
+
+            pathVisualizer.SetProjectionMode(projectPathsToTopDown, pathProjectionHeight);
+        }
+    }
+
+    public float CalculatePathProjectionHeight()
+    {
+        float maxHeight = Mathf.Max(cruiseHeight, planningWorldMax.y);
+        Transform root = ResolveObstacleRoot();
+        if (root != null)
+        {
+            Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i] != null)
+                {
+                    maxHeight = Mathf.Max(maxHeight, renderers[i].bounds.max.y);
+                }
+            }
+
+            Collider[] colliders = root.GetComponentsInChildren<Collider>(true);
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                if (colliders[i] != null)
+                {
+                    maxHeight = Mathf.Max(maxHeight, colliders[i].bounds.max.y);
+                }
+            }
+        }
+
+        return maxHeight + 0.35f;
+    }
+
+    public int GetBuildingWarningCount()
+    {
+        int count = 0;
+        foreach (DroneController drone in drones)
+        {
+            if (drone == null)
+            {
+                continue;
+            }
+
+            DronePathVisualizer pathVisualizer = drone.GetComponent<DronePathVisualizer>();
+            if (pathVisualizer != null && pathVisualizer.HasBuildingAlert)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    public bool IsPointInsideObstacleFootprint(Vector3 worldPoint, float padding = 0.15f)
+    {
+        EnsureObstacleFootprintCache();
+
+        for (int i = 0; i < obstacleFootprintBounds.Count; i++)
+        {
+            if (IsPointInsideBoundsXZ(worldPoint, obstacleFootprintBounds[i], padding))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public bool DoesSegmentCrossObstacleFootprint(Vector3 startWorldPoint, Vector3 endWorldPoint, float padding = 0.15f)
+    {
+        EnsureObstacleFootprintCache();
+
+        for (int i = 0; i < obstacleFootprintBounds.Count; i++)
+        {
+            if (SegmentIntersectsBoundsXZ(startWorldPoint, endWorldPoint, obstacleFootprintBounds[i], padding))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public bool DoesPolylineCrossObstacleFootprint(IList<Vector3> points, float padding = 0.15f)
+    {
+        if (points == null || points.Count == 0)
+        {
+            return false;
+        }
+
+        if (IsPointInsideObstacleFootprint(points[0], padding))
+        {
+            return true;
+        }
+
+        for (int i = 1; i < points.Count; i++)
+        {
+            if (DoesSegmentCrossObstacleFootprint(points[i - 1], points[i], padding))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -679,6 +814,7 @@ public class DroneManager : MonoBehaviour
         }
 
         Debug.Log($"[DroneManager] 已完成障碍物自动配置，根节点：{root.name}，代理碰撞体数量：{configuredCount}");
+        RefreshObstacleFootprintCache();
     }
 
     private Transform ResolveObstacleRoot()
@@ -695,6 +831,147 @@ public class DroneManager : MonoBehaviour
         }
 
         return obstacleRoot;
+    }
+
+    private void EnsureObstacleFootprintCache()
+    {
+        if (!obstacleFootprintCacheInitialized)
+        {
+            RefreshObstacleFootprintCache();
+        }
+    }
+
+    private void RefreshObstacleFootprintCache()
+    {
+        obstacleFootprintBounds.Clear();
+        obstacleFootprintCacheInitialized = true;
+
+        Transform root = ResolveObstacleRoot();
+        if (root == null)
+        {
+            return;
+        }
+
+        Collider[] colliders = root.GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            Collider collider = colliders[i];
+            if (collider == null)
+            {
+                continue;
+            }
+
+            Bounds bounds = collider.bounds;
+            if (bounds.size.sqrMagnitude <= 0.0001f)
+            {
+                continue;
+            }
+
+            obstacleFootprintBounds.Add(bounds);
+        }
+
+        if (obstacleFootprintBounds.Count > 0)
+        {
+            return;
+        }
+
+        Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            Bounds bounds = renderer.bounds;
+            if (bounds.size.sqrMagnitude <= 0.0001f)
+            {
+                continue;
+            }
+
+            obstacleFootprintBounds.Add(bounds);
+        }
+    }
+
+    private static bool IsPointInsideBoundsXZ(Vector3 point, Bounds bounds, float padding)
+    {
+        float minX = bounds.min.x - padding;
+        float maxX = bounds.max.x + padding;
+        float minZ = bounds.min.z - padding;
+        float maxZ = bounds.max.z + padding;
+
+        return point.x >= minX &&
+               point.x <= maxX &&
+               point.z >= minZ &&
+               point.z <= maxZ;
+    }
+
+    private static bool SegmentIntersectsBoundsXZ(Vector3 start, Vector3 end, Bounds bounds, float padding)
+    {
+        float minX = bounds.min.x - padding;
+        float maxX = bounds.max.x + padding;
+        float minZ = bounds.min.z - padding;
+        float maxZ = bounds.max.z + padding;
+
+        if ((start.x < minX && end.x < minX) ||
+            (start.x > maxX && end.x > maxX) ||
+            (start.z < minZ && end.z < minZ) ||
+            (start.z > maxZ && end.z > maxZ))
+        {
+            return false;
+        }
+
+        if (IsPointInsideBoundsXZ(start, bounds, padding) || IsPointInsideBoundsXZ(end, bounds, padding))
+        {
+            return true;
+        }
+
+        float deltaX = end.x - start.x;
+        float deltaZ = end.z - start.z;
+        float tMin = 0f;
+        float tMax = 1f;
+
+        return ClipLine(-deltaX, start.x - minX, ref tMin, ref tMax) &&
+               ClipLine(deltaX, maxX - start.x, ref tMin, ref tMax) &&
+               ClipLine(-deltaZ, start.z - minZ, ref tMin, ref tMax) &&
+               ClipLine(deltaZ, maxZ - start.z, ref tMin, ref tMax);
+    }
+
+    private static bool ClipLine(float denominator, float numerator, ref float tMin, ref float tMax)
+    {
+        if (Mathf.Abs(denominator) <= 0.0001f)
+        {
+            return numerator >= 0f;
+        }
+
+        float t = numerator / denominator;
+        if (denominator > 0f)
+        {
+            if (t > tMax)
+            {
+                return false;
+            }
+
+            if (t > tMin)
+            {
+                tMin = t;
+            }
+        }
+        else
+        {
+            if (t < tMin)
+            {
+                return false;
+            }
+
+            if (t < tMax)
+            {
+                tMax = t;
+            }
+        }
+
+        return true;
     }
 
     private void ApplyLayerRecursively(GameObject root, int layer)

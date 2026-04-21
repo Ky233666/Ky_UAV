@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// Manages the overview and follow cameras.
+/// Manages overview, follow, and top-down 2D inspection cameras.
 /// </summary>
 public class CameraManager : MonoBehaviour
 {
@@ -22,17 +22,32 @@ public class CameraManager : MonoBehaviour
 
     [Header("Follow Settings")]
     public Transform targetDrone;
-    public Vector3 followOffset = new Vector3(0, 5, -10);
-    public Vector3 lookAtOffset = new Vector3(0, 1.5f, 0);
+    public Vector3 followOffset = new Vector3(0f, 5f, -10f);
+    public Vector3 lookAtOffset = new Vector3(0f, 1.5f, 0f);
     public float followSmoothTime = 6f;
+
+    [Header("Top Down 2D Settings")]
+    public float topDownHeight = 48f;
+    public float topDownPanSpeed = 20f;
+    public float topDownZoomSpeed = 10f;
+    public float topDownMinOrthographicSize = 8f;
+    public float topDownMaxOrthographicSize = 120f;
+    public float topDownFramePadding = 10f;
 
     [Header("Current Mode")]
     public bool isOverview = true;
+    public bool isTopDown2D = false;
 
     private readonly List<DroneController> managedDrones = new List<DroneController>();
     private int currentFollowIndex = -1;
     private float overviewYaw;
     private float overviewPitch;
+    private bool hasStoredOverviewPose;
+    private Vector3 storedOverviewPosition;
+    private Quaternion storedOverviewRotation;
+    private bool storedOverviewOrthographic;
+    private float storedOverviewOrthographicSize;
+    private float storedOverviewFieldOfView;
 
     void Start()
     {
@@ -53,14 +68,25 @@ public class CameraManager : MonoBehaviour
             SwitchToFollow();
         }
 
+        if (Input.GetKeyDown(KeyCode.Alpha3))
+        {
+            SwitchToTopDown2D();
+        }
+
         if (Input.GetKeyDown(KeyCode.Tab) || Input.GetKeyDown(KeyCode.E))
         {
             FocusNextDrone();
         }
 
-        if (Input.GetKeyDown(KeyCode.Q))
+        if (Input.GetKeyDown(KeyCode.Q) && !Input.GetKey(KeyCode.LeftControl) && !Input.GetKey(KeyCode.RightControl))
         {
             FocusPreviousDrone();
+        }
+
+        if (isTopDown2D)
+        {
+            UpdateTopDownCamera();
+            return;
         }
 
         if (isOverview)
@@ -76,30 +102,32 @@ public class CameraManager : MonoBehaviour
 
     void UpdateCameraState()
     {
+        bool useOverviewCamera = isOverview || isTopDown2D;
+
         if (overviewCamera != null)
         {
-            overviewCamera.enabled = isOverview;
+            overviewCamera.enabled = useOverviewCamera;
             AudioListener overviewListener = overviewCamera.GetComponent<AudioListener>();
             if (overviewListener != null)
             {
-                overviewListener.enabled = isOverview;
+                overviewListener.enabled = useOverviewCamera;
             }
         }
 
         if (followCamera != null)
         {
-            followCamera.enabled = !isOverview;
+            followCamera.enabled = !useOverviewCamera;
             AudioListener followListener = followCamera.GetComponent<AudioListener>();
             if (followListener != null)
             {
-                followListener.enabled = !isOverview;
+                followListener.enabled = !useOverviewCamera;
             }
         }
     }
 
     public Camera GetActiveCamera()
     {
-        if (!isOverview && followCamera != null)
+        if (!isOverview && !isTopDown2D && followCamera != null)
         {
             return followCamera;
         }
@@ -112,17 +140,75 @@ public class CameraManager : MonoBehaviour
         return Camera.main;
     }
 
+    public string GetCurrentModeIdentifier()
+    {
+        if (isTopDown2D)
+        {
+            return "TopDown2D";
+        }
+
+        return isOverview ? "Overview" : "Follow";
+    }
+
+    public string GetCurrentModeDisplayName()
+    {
+        if (isTopDown2D)
+        {
+            return "2D俯视";
+        }
+
+        return isOverview ? "总览" : "跟随";
+    }
+
     public void SwitchToOverview()
     {
+        if (hasStoredOverviewPose)
+        {
+            RestoreStoredOverviewPose();
+        }
+
+        isTopDown2D = false;
         isOverview = true;
+        InitializeOverviewCameraState();
         UpdateCameraState();
+        ApplyPathProjectionMode();
+        Debug.Log("[CameraManager] 已切换到总览视角");
     }
 
     public void SwitchToFollow()
     {
+        if (isTopDown2D)
+        {
+            RestoreStoredOverviewPose();
+        }
+
+        isTopDown2D = false;
         isOverview = false;
         EnsureFollowTarget();
         UpdateCameraState();
+        ApplyPathProjectionMode();
+        Debug.Log("[CameraManager] 已切换到跟随视角");
+    }
+
+    public void SwitchToTopDown2D()
+    {
+        if (overviewCamera == null)
+        {
+            SwitchToOverview();
+            return;
+        }
+
+        if (!isTopDown2D)
+        {
+            StoreOverviewPose();
+        }
+
+        isOverview = true;
+        isTopDown2D = true;
+        ApplyTopDownFrame(true);
+        UpdateCameraState();
+        ApplyPathProjectionMode();
+        Debug.Log("[CameraManager] 已切换到2D俯视轨迹视图");
     }
 
     public void RefreshManagedDrones()
@@ -143,12 +229,14 @@ public class CameraManager : MonoBehaviour
         {
             targetDrone = null;
             currentFollowIndex = -1;
+            ApplyPathProjectionMode();
             return;
         }
 
         if (targetDrone == null)
         {
             SetFollowTarget(0);
+            ApplyPathProjectionMode();
             return;
         }
 
@@ -157,18 +245,26 @@ public class CameraManager : MonoBehaviour
             if (managedDrones[i] != null && managedDrones[i].transform == targetDrone)
             {
                 currentFollowIndex = i;
+                ApplyPathProjectionMode();
                 return;
             }
         }
 
         SetFollowTarget(0);
+        ApplyPathProjectionMode();
     }
 
     public void FocusNextDrone()
     {
-        if (isOverview)
+        if (isTopDown2D)
+        {
+            RestoreStoredOverviewPose();
+        }
+
+        if (isOverview || isTopDown2D)
         {
             isOverview = false;
+            isTopDown2D = false;
         }
 
         EnsureFollowTarget();
@@ -180,13 +276,20 @@ public class CameraManager : MonoBehaviour
         int nextIndex = currentFollowIndex < 0 ? 0 : (currentFollowIndex + 1) % managedDrones.Count;
         SetFollowTarget(nextIndex);
         UpdateCameraState();
+        ApplyPathProjectionMode();
     }
 
     public void FocusPreviousDrone()
     {
-        if (isOverview)
+        if (isTopDown2D)
+        {
+            RestoreStoredOverviewPose();
+        }
+
+        if (isOverview || isTopDown2D)
         {
             isOverview = false;
+            isTopDown2D = false;
         }
 
         EnsureFollowTarget();
@@ -200,13 +303,14 @@ public class CameraManager : MonoBehaviour
             : (currentFollowIndex - 1 + managedDrones.Count) % managedDrones.Count;
         SetFollowTarget(previousIndex);
         UpdateCameraState();
+        ApplyPathProjectionMode();
     }
 
     public void SetFollowOffset(Vector3 offset)
     {
         followOffset = offset;
 
-        if (!isOverview)
+        if (!isOverview && !isTopDown2D)
         {
             UpdateFollowCamera();
         }
@@ -343,6 +447,138 @@ public class CameraManager : MonoBehaviour
         Vector3 clampedPosition = cameraTransform.position;
         clampedPosition.y = Mathf.Clamp(clampedPosition.y, overviewMinHeight, overviewMaxHeight);
         cameraTransform.position = clampedPosition;
+    }
+
+    private void UpdateTopDownCamera()
+    {
+        if (overviewCamera == null)
+        {
+            return;
+        }
+
+        Transform cameraTransform = overviewCamera.transform;
+        float moveMultiplier = Input.GetKey(KeyCode.LeftShift) ? overviewBoostMultiplier : 1f;
+        Vector3 panInput = new Vector3(Input.GetAxisRaw("Horizontal"), 0f, Input.GetAxisRaw("Vertical"));
+        cameraTransform.position += panInput * (topDownPanSpeed * moveMultiplier * Time.deltaTime);
+
+        float scroll = Input.mouseScrollDelta.y;
+        if (Mathf.Abs(scroll) > 0.001f)
+        {
+            overviewCamera.orthographicSize = Mathf.Clamp(
+                overviewCamera.orthographicSize - scroll * topDownZoomSpeed,
+                topDownMinOrthographicSize,
+                topDownMaxOrthographicSize);
+        }
+
+        float topDownY = ResolveTopDownHeight();
+        cameraTransform.position = new Vector3(cameraTransform.position.x, topDownY, cameraTransform.position.z);
+        cameraTransform.rotation = Quaternion.Euler(90f, 0f, 0f);
+        overviewCamera.orthographic = true;
+    }
+
+    private void ApplyTopDownFrame(bool refitSize)
+    {
+        if (overviewCamera == null)
+        {
+            return;
+        }
+
+        Vector3 center;
+        Vector3 size;
+        CalculateTopDownBounds(out center, out size);
+
+        overviewCamera.orthographic = true;
+        overviewCamera.transform.position = new Vector3(center.x, ResolveTopDownHeight(), center.z);
+        overviewCamera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+
+        if (refitSize)
+        {
+            float targetSize = Mathf.Max(size.x, size.z) * 0.5f + topDownFramePadding;
+            overviewCamera.orthographicSize = Mathf.Clamp(
+                targetSize,
+                topDownMinOrthographicSize,
+                topDownMaxOrthographicSize);
+        }
+    }
+
+    private float ResolveTopDownHeight()
+    {
+        float minimumHeight = topDownHeight;
+        if (DroneManager.Instance != null)
+        {
+            minimumHeight = Mathf.Max(minimumHeight, DroneManager.Instance.CalculatePathProjectionHeight() + 6f);
+        }
+
+        return minimumHeight;
+    }
+
+    private void CalculateTopDownBounds(out Vector3 center, out Vector3 size)
+    {
+        if (DroneManager.Instance != null)
+        {
+            Vector3 worldMin = DroneManager.Instance.planningWorldMin;
+            Vector3 worldMax = DroneManager.Instance.planningWorldMax;
+            Bounds bounds = new Bounds((worldMin + worldMax) * 0.5f, worldMax - worldMin);
+
+            for (int i = 0; i < managedDrones.Count; i++)
+            {
+                DroneController drone = managedDrones[i];
+                if (drone != null)
+                {
+                    bounds.Encapsulate(drone.transform.position);
+                }
+            }
+
+            center = bounds.center;
+            size = bounds.size;
+            return;
+        }
+
+        center = Vector3.zero;
+        size = new Vector3(60f, 1f, 60f);
+    }
+
+    private void StoreOverviewPose()
+    {
+        if (overviewCamera == null)
+        {
+            return;
+        }
+
+        Transform cameraTransform = overviewCamera.transform;
+        hasStoredOverviewPose = true;
+        storedOverviewPosition = cameraTransform.position;
+        storedOverviewRotation = cameraTransform.rotation;
+        storedOverviewOrthographic = overviewCamera.orthographic;
+        storedOverviewOrthographicSize = overviewCamera.orthographicSize;
+        storedOverviewFieldOfView = overviewCamera.fieldOfView;
+    }
+
+    private void RestoreStoredOverviewPose()
+    {
+        if (!hasStoredOverviewPose || overviewCamera == null)
+        {
+            return;
+        }
+
+        Transform cameraTransform = overviewCamera.transform;
+        cameraTransform.position = storedOverviewPosition;
+        cameraTransform.rotation = storedOverviewRotation;
+        overviewCamera.orthographic = storedOverviewOrthographic;
+        overviewCamera.orthographicSize = storedOverviewOrthographicSize;
+        overviewCamera.fieldOfView = storedOverviewFieldOfView;
+        hasStoredOverviewPose = false;
+    }
+
+    private void ApplyPathProjectionMode()
+    {
+        if (DroneManager.Instance == null)
+        {
+            return;
+        }
+
+        float projectionHeight = DroneManager.Instance.CalculatePathProjectionHeight();
+        DroneManager.Instance.SetPathProjectionMode(isTopDown2D, projectionHeight);
     }
 
     private float NormalizePitch(float pitch)

@@ -190,6 +190,12 @@ public class DroneController : MonoBehaviour
             return;
         }
 
+        if (cachedRigidbody.isKinematic)
+        {
+            cachedRigidbody.Sleep();
+            return;
+        }
+
         cachedRigidbody.velocity = Vector3.zero;
         cachedRigidbody.angularVelocity = Vector3.zero;
     }
