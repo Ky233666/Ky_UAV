@@ -1,0 +1,82 @@
+# 测试与实验
+
+## 1. 测试目标
+
+当前测试不是覆盖所有 Unity 交互细节，而是围绕“毕设演示能否稳定跑通”建立最小可交付验证链。
+
+## 2. 自动化验证
+
+### 2.1 烟雾验证
+
+入口：
+
+- `ProjectSmokeValidator.RunSmokeValidation`
+
+用途：
+
+- 打开主场景
+- 检查关键对象和关键引用是否存在
+
+### 2.2 EditMode 测试
+
+测试程序集：
+
+- `KyUAV.EditMode.Tests`
+
+当前用例：
+
+- `SchedulingAlgorithmTests`
+- `PlanningAndExportTests`
+- `AlgorithmNameMappingTests`
+- `ExperimentPresetCatalogTests`
+
+覆盖重点：
+
+- 调度容量约束
+- 规划基础约束
+- CSV 格式
+- 算法命名稳定性
+- 实验预设目录稳定性
+
+## 3. 人工测试与交付记录
+
+当前仓库保留了两份证据文档：
+
+- [功能测试记录](function-test-checklist.md)
+- [稳定性测试记录](stability-test-record.md)
+
+它们记录了当前打包版已自动验证通过、部分通过和待人工复核的项目。
+
+## 4. 当前实验矩阵
+
+实验预设由 `KyUavDeliveryAssetTools` 自动生成，固定为四组：
+
+- 调度对比：`EvenSplit / GreedyNearest / PriorityGreedy` + `AStar` + `4` 架无人机
+- 规划对比：`StraightLine / AStar / RRT` + `PriorityGreedy` + `4` 架无人机
+- 机群扩展：`2 / 4 / 6 / 8` 架无人机 + `PriorityGreedy + AStar`
+- 障碍密度：`Sparse / Medium / Dense` + `PriorityGreedy + AStar` + `4` 架无人机
+
+## 5. 当前可用结果类型
+
+- 单次 CSV 摘要
+- 单次 JSON 明细
+- 批量实验 `session_manifest.json`
+- 批量实验 `session_summary.csv`
+
+## 6. 当前验证结论
+
+依据现有记录，可确认：
+
+- 主流程启动、暂停、继续、重置、重建已跑通
+- `2D俯视` 和建筑告警检查入口已接入
+- `kinematic rigidbody` 速度写入警告已清除
+- 默认任务集下未触发建筑穿越告警
+
+## 7. 当前验证空白
+
+以下内容仍需人工补测或专项测试：
+
+- 通过面板点击验证 JSON 导出
+- 通过面板点击验证批量实验并核对 `session_manifest.json`、`session_summary.csv`
+- 构造显式穿越建筑 footprint 的任务集，验证建筑告警触发
+- 更复杂密集场景下的局部避让稳定性

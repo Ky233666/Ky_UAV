@@ -1,107 +1,85 @@
 # Ky_UAV
 
-基于 Unity 的多无人机协同巡检与路径规划仿真项目，当前收口目标为“毕设答辩可稳定演示、实验结果可复现、交付材料可直接归档”。
+多无人机协同路径规划与调度算法的仿真系统设计与实现。
 
-## 当前范围
+本项目基于 Unity 2022.3.62f3，目标不是单独复现某个算法，而是构建一个可运行、可配置、可演示、可导出的多无人机仿真系统。系统围绕城市障碍环境下的任务分配、路径规划、状态推进、可视化观察和实验结果留档展开，适合毕业设计演示、系统设计说明和论文撰写引用。
 
-主场景为 `Assets/Scenes/Main/MainScene.unity`，并已写入构建场景配置。当前版本保留以下正式能力：
+## 项目定位
 
-- 多无人机生成、重建、任务分配、状态控制与重置
-- 调度算法切换：`EvenSplit`、`GreedyNearest`、`PriorityGreedy`
-- 路径规划算法切换：`StraightLine`、`AStar`、`RRT`
-- 任务点运行时新增、清空、导入
-- 起飞点运行时新增、移动、删除、清空
-- 总览/跟随相机切换与多机观察
-- 规划路径与飞行轨迹可视化
-- CSV/JSON 单次导出与批量实验导出
-- session 级 `session_manifest.json` 与 `session_summary.csv`
-- 面向打包版的运行时控制面板
-- 运行时实验中心：预设分组浏览、实验矩阵切换、预设应用、预设批量与当前配置批量运行
+- 面向多无人机场景的仿真系统，而不是纯算法脚本集合。
+- 支持调度算法和路径规划算法以统一接口接入系统。
+- 支持任务点配置、起飞点配置、参数设置、仿真控制、结果导出和批量实验。
+- 强调软件工程结构、运行时交互和可视化表达。
 
-当前阶段不继续扩展联网、强化学习、复杂动力学等高风险内容。
+## 当前已实现能力
 
-## 环境
+- 主场景固定为 `Assets/Scenes/Main/MainScene.unity`，已写入构建配置。
+- 城市建筑障碍环境已接入主场景，`DroneManager` 可自动配置建筑层和障碍代理碰撞体。
+- 支持 `EvenSplit`、`GreedyNearest`、`PriorityGreedy` 三种调度算法。
+- 支持 `StraightLine`、`AStar`、`RRT` 三种路径规划算法。
+- 支持无人机生成、重建、任务分配、状态推进、重置和简单局部避让。
+- 支持任务点运行时新增、清空、导入。
+- 支持起飞点运行时新增、移动、删除、清空。
+- 支持总览、跟随、`2D俯视` 三种观察模式，以及路径与轨迹可视化。
+- 支持实时统计、CSV/JSON 导出、批量实验、`session_manifest.json`、`session_summary.csv`。
+- 支持运行时实验中心，按 `Scheduling / Planning / Scaling / Density` 预设分组切换实验。
+- 支持编辑器烟雾验证、Windows 一键打包和 EditMode 自动化测试。
 
-- Unity `2022.3.62f3`
-- C#
+## 当前未完成或仅为演示级实现
 
-## 快速开始
+- 多机协同避让仍是基于局部规则的第一版实现，不是正式的时空协同避碰算法。
+- 结果对比依赖导出文件和批量实验，不提供独立的结果回放模块。
+- 不支持运行时多场景加载，也没有地图编辑器式场景创建流程。
+- 没有联网、强化学习、复杂动力学、传感器建模等扩展模块。
 
-1. 使用 Unity Hub 打开项目。
-2. 打开 `Assets/Scenes/Main/MainScene.unity`。
-3. 首次收口初始化时执行 `Tools/KY UAV/Bootstrap Delivery Assets`，生成 `DroneConfig` 和实验预设资产。
+## 代码结构
+
+- `Assets/Scripts/UAV/Controller`
+  - 仿真控制、无人机管理、状态机、相机、运行时面板、导出、任务点与起飞点交互。
+- `Assets/Scripts/UAV/Comm`
+  - 调度算法、路径规划算法、算法接口、算法名称映射、实验预设目录构建。
+- `Assets/Scripts/UAV/Config`
+  - `DroneConfig` 默认参数配置。
+- `Assets/Scripts/UAV/Model`
+  - 调度请求/结果、路径请求/结果、实验导出模型、实验预设模型。
+- `Assets/Editor`
+  - 交付资产初始化、烟雾验证、批量测试、Windows 打包、城市场景导入与环境修复工具。
+- `Assets/Tests/EditMode/Editor`
+  - 调度、规划、导出、算法名称映射、实验预设目录逻辑测试。
+
+## 快速运行
+
+1. 使用 Unity Hub 以 `2022.3.62f3` 打开项目。
+2. 首次打开后执行 `Tools/KY UAV/Bootstrap Delivery Assets`，生成 `DroneConfig` 和实验预设资产。
+3. 打开 `Assets/Scenes/Main/MainScene.unity`。
 4. 进入 Play Mode。
-5. 使用底部和右侧运行时面板完成任务导入、算法切换、开始、暂停、重置、导出和批量实验。
+5. 使用主场景原有 Canvas 按钮进行任务点新增、导入、清空。
+6. 使用右侧运行时控制面板进行仿真控制、算法切换、规划参数设置、起飞点管理、导出和批量实验。
 
-## 验证入口
+## 构建与验证
 
-- `Tools/KY UAV/Bootstrap Delivery Assets`
-  - 生成默认 `DroneConfig` 资产和 4 组实验矩阵对应的 `ExperimentPreset` 资产。
-- `Tools/KY UAV/Run Project Smoke Validation`
-  - 打开 `MainScene`，检查 `SimulationManager`、`DroneManager`、`CameraManager`、`TaskPointImporter`、`Buildings`、`Canvas` 等关键对象及引用。
-
-如果要在命令行执行这两个入口，必须先关闭正在占用该项目的 Unity 编辑器实例，否则 batchmode 会被项目锁直接拦截。
-
-## 主要交互
-
-### 仿真控制
-
-- `开始仿真`：按当前调度器和规划器分配任务并启动机群
-- `暂停`：暂停当前仿真
-- `重置`：清理任务状态、路径缓存、轨迹和统计并回到就绪态
-- `重建机群`：按面板数量重新生成无人机并走完整重置链路
-
-### 任务与视角
-
-- `新增任务点` / `导入任务` / `清空任务`
-- `1` 切总览，`2` 切跟随
-- `Tab` / `E` 切下一架无人机，`Q` 切上一架
-- `W/A/S/D` 平移，`R/F` 升降，鼠标滚轮缩放，右键旋转总览视角
-
-### 运行时面板
-
-右侧运行时面板已覆盖答辩演示常用操作：
-
-- 调度算法与路径规划算法切换
-- 无人机数量调整与机群重建
-- 飞行速度与仿真倍速调整
-- 规划边界与路径显示相关设置
-- 总览/跟随/下一架无人机切换
-- 导出目录切换
-- 批量实验启动/停止与预设状态显示
-- 实验中心内按分组浏览 `Scheduling / Planning / Scaling / Density` 预设并直接启动
-
-## 实验导出
-
-- 默认导出根目录：`Application.persistentDataPath/ExperimentResults`
-- 默认归档结构：`根目录 / 日期 / 会话`
-- 单次导出：
-  - CSV 摘要
-  - JSON 详细结果
-- 批量实验额外导出：
-  - `session_manifest.json`
-  - `session_summary.csv`
-
-固定实验矩阵见 [ExecutionPlan.md](/D:/unityhub/project/Ky_UAV/Assets/Docs/ExecutionPlan.md) 与 [ExperimentExecutionGuide.md](/D:/unityhub/project/Ky_UAV/Assets/Docs/ExperimentExecutionGuide.md)。
-
-## 关键脚本
-
-- `Assets/Scripts/UAV/Controller/SimulationManager.cs`
-- `Assets/Scripts/UAV/Controller/DroneManager.cs`
-- `Assets/Scripts/UAV/Controller/DroneStateMachine.cs`
-- `Assets/Scripts/UAV/Controller/SimulationRuntimeControlPanel.cs`
-- `Assets/Scripts/UAV/Controller/SimulationResultExporter.cs`
-- `Assets/Scripts/UAV/Controller/BatchExperimentRunner.cs`
-- `Assets/Scripts/UAV/Config/DroneConfig.cs`
-- `Assets/Scripts/UAV/Model/ExperimentPreset.cs`
-- `Assets/Editor/KyUavDeliveryAssetTools.cs`
-- `Assets/Editor/ProjectSmokeValidator.cs`
+- 烟雾验证：`Tools/KY UAV/Run Project Smoke Validation`
+- Windows 打包：`Tools/KY UAV/Build Windows Player`
+- EditMode 批处理入口：`KyUavEditModeBatchRunner.RunEditModeTests`
+- 默认打包输出目录：`D:\unityhub\project\build\Ky_UAV`
 
 ## 文档入口
 
-- 执行计划：[Assets/Docs/ExecutionPlan.md](/D:/unityhub/project/Ky_UAV/Assets/Docs/ExecutionPlan.md)
-- 项目现状：[Assets/Docs/ProjectStatusAndRoadmap.md](/D:/unityhub/project/Ky_UAV/Assets/Docs/ProjectStatusAndRoadmap.md)
-- 功能测试表：[Assets/Docs/FunctionTestChecklist.md](/D:/unityhub/project/Ky_UAV/Assets/Docs/FunctionTestChecklist.md)
-- 稳定性记录：[Assets/Docs/StabilityTestRecord.md](/D:/unityhub/project/Ky_UAV/Assets/Docs/StabilityTestRecord.md)
-- 实验执行说明：[Assets/Docs/ExperimentExecutionGuide.md](/D:/unityhub/project/Ky_UAV/Assets/Docs/ExperimentExecutionGuide.md)
-- 答辩演示脚本：[Assets/Docs/DefenseDemoScript.md](/D:/unityhub/project/Ky_UAV/Assets/Docs/DefenseDemoScript.md)
+项目文档现已统一到根目录 `docs`：
+
+- [文档索引](docs/README.md)
+- [项目概览](docs/project-overview.md)
+- [功能说明](docs/feature-specification.md)
+- [系统架构](docs/system-architecture.md)
+- [模块设计](docs/module-design.md)
+- [用户指南](docs/user-guide.md)
+- [部署与构建](docs/deployment-guide.md)
+- [测试与实验](docs/testing-and-evaluation.md)
+- [执行计划](docs/execution-plan.md)
+- [功能测试记录](docs/function-test-checklist.md)
+- [稳定性测试记录](docs/stability-test-record.md)
+
+## 说明
+
+- 若文档内容与代码不一致，以 `Assets/Scripts/UAV`、`Assets/Editor` 和 `docs` 下的最新文档为准。
+- 当前版本最适合展示“系统设计与实现”，而不是宣称已经完成复杂协同优化算法研究。
