@@ -17,11 +17,12 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     public SimulationResultExporter resultExporter;
     public BatchExperimentRunner batchExperimentRunner;
     public DroneSpawnPointUIManager spawnPointManager;
+    public RuntimeObstacleEditor obstacleEditor;
 
     [Header("Panel Layout")]
-    public Vector2 expandedSize = new Vector2(356f, 460f);
-    public Vector2 collapsedSize = new Vector2(356f, 112f);
-    public Vector2 anchoredPosition = new Vector2(-36f, -182f);
+    public Vector2 expandedSize = new Vector2(384f, 460f);
+    public Vector2 collapsedSize = new Vector2(384f, 116f);
+    public Vector2 anchoredPosition = new Vector2(-24f, -96f);
     public bool startExpanded = true;
 
     private const string PanelRootName = "__RuntimeControlPanel";
@@ -48,6 +49,12 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     private const float MinFollowDistance = 4f;
     private const float MaxFollowDistance = 20f;
     private const float FollowDistanceStep = 1f;
+    private const float MinObstacleHeight = 2f;
+    private const float MaxObstacleHeight = 30f;
+    private const float ObstacleHeightStep = 1f;
+    private const float MinObstacleScale = 0.5f;
+    private const float MaxObstacleScale = 5f;
+    private const float ObstacleScaleStep = 0.25f;
     private const int MinBatchRunCount = 1;
     private const int MaxBatchRunCount = 50;
     private const float StatsCardMinHeight = 168f;
@@ -66,6 +73,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     private static readonly Color QuitButtonColor = new Color(0.62f, 0.24f, 0.24f, 0.98f);
 
     private RectTransform panelRoot;
+    private RectTransform summaryCardRoot;
     private RectTransform bodyRoot;
     private RectTransform footerRoot;
     private RectTransform scrollContentRoot;
@@ -84,6 +92,9 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     private TMP_Text planningMaxYValueText;
     private TMP_Text followHeightValueText;
     private TMP_Text followDistanceValueText;
+    private TMP_Text obstacleHeightValueText;
+    private TMP_Text obstacleStyleValueText;
+    private TMP_Text obstacleScaleValueText;
     private TMP_Text exportDirectoryStatusText;
     private TMP_Text batchRunCountValueText;
     private TMP_Text batchStatusText;
@@ -102,6 +113,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     private Button obstacleAutoConfigToggleButton;
     private bool isExpanded;
     private float nextSummaryRefreshTime;
+    private Vector2 lastCanvasSize;
 
     private SchedulerAlgorithmType[] schedulerOptions;
     private PathPlannerType[] plannerOptions;
@@ -119,6 +131,9 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     private float configuredPlanningMaxY = 10f;
     private float configuredFollowHeight = 5f;
     private float configuredFollowDistance = 10f;
+    private float configuredObstacleHeight = 10f;
+    private float configuredObstacleScale = 1f;
+    private string configuredObstacleTemplateName = "长方体";
     private bool showPlannedPath = true;
     private bool showTrail = true;
     private bool configuredAllowDiagonalPlanning = true;
@@ -157,9 +172,19 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
 
         HandleRuntimeShortcuts();
 
+        Vector2 canvasSize = GetCanvasSize();
+        if ((canvasSize - lastCanvasSize).sqrMagnitude > 0.01f)
+        {
+            lastCanvasSize = canvasSize;
+            ApplyExpandState();
+            RefreshStatsCardLayout();
+        }
+
         if (Time.unscaledTime >= nextSummaryRefreshTime)
         {
             nextSummaryRefreshTime = Time.unscaledTime + 0.35f;
+            SyncFromSystems();
+            RefreshAllLabels();
             RefreshBatchStatus();
             RefreshSummary();
         }
@@ -213,22 +238,61 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
             spawnPointManager = FindObjectOfType<DroneSpawnPointUIManager>();
         }
 
+        if (obstacleEditor == null)
+        {
+            obstacleEditor = FindObjectOfType<RuntimeObstacleEditor>();
+        }
+
         if (runtimeFont == null)
         {
-            TMP_Text referenceText = simulationManager != null ? simulationManager.statusText : null;
-            if (referenceText == null)
-            {
-                referenceText = FindObjectOfType<TextMeshProUGUI>();
-            }
-
-            if (referenceText != null)
-            {
-                runtimeFont = referenceText.font;
-            }
+            runtimeFont = ResolveRuntimeFont();
         }
 
         schedulerOptions = (SchedulerAlgorithmType[])Enum.GetValues(typeof(SchedulerAlgorithmType));
         plannerOptions = (PathPlannerType[])Enum.GetValues(typeof(PathPlannerType));
+    }
+
+    private TMP_FontAsset ResolveRuntimeFont()
+    {
+        TMP_FontAsset candidate = simulationManager != null && simulationManager.statusText != null
+            ? simulationManager.statusText.font
+            : null;
+
+        if (SupportsChineseGlyphs(candidate))
+        {
+            return candidate;
+        }
+
+        TMP_Text[] sceneTexts = FindObjectsOfType<TMP_Text>(true);
+        foreach (TMP_Text text in sceneTexts)
+        {
+            if (text == null || text.font == null)
+            {
+                continue;
+            }
+
+            if (candidate == null)
+            {
+                candidate = text.font;
+            }
+
+            if (SupportsChineseGlyphs(text.font))
+            {
+                return text.font;
+            }
+        }
+
+        return candidate;
+    }
+
+    private static bool SupportsChineseGlyphs(TMP_FontAsset font)
+    {
+        if (font == null)
+        {
+            return false;
+        }
+
+        return font.HasCharacter('中') || font.HasCharacter('态') || font.HasCharacter('仿');
     }
 
     private void BuildPanelIfNeeded()
@@ -254,11 +318,12 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
             panelRoot.SetParent(canvas.transform, false);
         }
 
+        lastCanvasSize = GetCanvasSize();
         panelRoot.anchorMin = new Vector2(1f, 1f);
         panelRoot.anchorMax = new Vector2(1f, 1f);
         panelRoot.pivot = new Vector2(1f, 1f);
         panelRoot.anchoredPosition = anchoredPosition;
-        panelRoot.sizeDelta = isExpanded ? expandedSize : collapsedSize;
+        panelRoot.sizeDelta = GetTargetPanelSize();
         panelRoot.localScale = Vector3.one;
         panelRoot.SetAsLastSibling();
 
@@ -309,10 +374,15 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
             quitButtonLabel.text = "退出";
         }
 
-        RectTransform summaryCard = CreatePanelArea("Summary", panelRoot, new Vector2(12f, -50f), new Vector2(-12f, -108f));
-        ConfigureSection(summaryCard, SectionColor);
-        summaryText = CreateText("SummaryText", summaryCard, string.Empty, 14f, PrimaryTextColor, FontStyles.Normal);
+        summaryCardRoot = CreatePanelArea("Summary", panelRoot, new Vector2(12f, -50f), new Vector2(-12f, -108f));
+        ConfigureSection(summaryCardRoot, SectionColor);
+        summaryText = CreateText("SummaryText", summaryCardRoot, string.Empty, 14f, PrimaryTextColor, FontStyles.Normal);
         summaryText.enableWordWrapping = true;
+        summaryText.overflowMode = TextOverflowModes.Overflow;
+        summaryText.enableAutoSizing = true;
+        summaryText.fontSizeMin = 11f;
+        summaryText.fontSizeMax = 14f;
+        summaryText.alignment = TextAlignmentOptions.TopLeft;
         summaryText.rectTransform.anchorMin = Vector2.zero;
         summaryText.rectTransform.anchorMax = Vector2.one;
         summaryText.rectTransform.offsetMin = new Vector2(10f, 8f);
@@ -336,6 +406,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         ConfigureSection(footerRoot, new Color(0.07f, 0.15f, 0.20f, 0.96f));
         footerText = CreateText("FooterText", footerRoot, string.Empty, 12f, SecondaryTextColor, FontStyles.Normal);
         footerText.enableWordWrapping = false;
+        footerText.overflowMode = TextOverflowModes.Ellipsis;
         footerText.alignment = TextAlignmentOptions.Left;
         footerText.rectTransform.anchorMin = Vector2.zero;
         footerText.rectTransform.anchorMax = Vector2.one;
@@ -349,14 +420,14 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         viewport.SetParent(parent, false);
         viewport.anchorMin = Vector2.zero;
         viewport.anchorMax = Vector2.one;
-        viewport.offsetMin = new Vector2(8f, 8f);
-        viewport.offsetMax = new Vector2(-12f, -8f);
+        viewport.offsetMin = new Vector2(10f, 10f);
+        viewport.offsetMax = new Vector2(-12f, -10f);
         Image viewportImage = viewport.gameObject.AddComponent<Image>();
         ConfigureImageGraphic(viewportImage);
-        viewportImage.color = new Color(0f, 0f, 0f, 0.02f);
+        viewportImage.color = new Color(0.02f, 0.07f, 0.10f, 0.18f);
         viewportImage.maskable = true;
-        Mask mask = viewport.gameObject.AddComponent<Mask>();
-        mask.showMaskGraphic = false;
+        viewportImage.raycastTarget = true;
+        viewport.gameObject.AddComponent<RectMask2D>();
 
         RectTransform content = new GameObject("Content", typeof(RectTransform)).GetComponent<RectTransform>();
         content.SetParent(viewport, false);
@@ -368,9 +439,9 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         scrollContentRoot = content;
 
         VerticalLayoutGroup layout = content.gameObject.AddComponent<VerticalLayoutGroup>();
-        layout.spacing = 6f;
+        layout.spacing = 12f;
         layout.padding = new RectOffset(0, 0, 0, 0);
-        layout.childAlignment = TextAnchor.UpperCenter;
+        layout.childAlignment = TextAnchor.UpperLeft;
         layout.childControlWidth = true;
         layout.childControlHeight = true;
         layout.childForceExpandWidth = true;
@@ -385,7 +456,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         scrollRect.horizontal = false;
         scrollRect.vertical = true;
         scrollRect.movementType = ScrollRect.MovementType.Clamped;
-        scrollRect.scrollSensitivity = 28f;
+        scrollRect.scrollSensitivity = 24f;
         scrollRect.inertia = true;
 
         RectTransform scrollbarRect = new GameObject("Scrollbar", typeof(RectTransform)).GetComponent<RectTransform>();
@@ -393,8 +464,8 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         scrollbarRect.anchorMin = new Vector2(1f, 0f);
         scrollbarRect.anchorMax = new Vector2(1f, 1f);
         scrollbarRect.pivot = new Vector2(1f, 1f);
-        scrollbarRect.offsetMin = new Vector2(-10f, 8f);
-        scrollbarRect.offsetMax = new Vector2(-6f, -8f);
+        scrollbarRect.offsetMin = new Vector2(-10f, 10f);
+        scrollbarRect.offsetMax = new Vector2(-4f, -10f);
 
         Image scrollbarTrack = scrollbarRect.gameObject.AddComponent<Image>();
         ConfigureImageGraphic(scrollbarTrack);
@@ -407,8 +478,8 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         slidingArea.SetParent(scrollbarRect, false);
         slidingArea.anchorMin = Vector2.zero;
         slidingArea.anchorMax = Vector2.one;
-        slidingArea.offsetMin = new Vector2(1f, 4f);
-        slidingArea.offsetMax = new Vector2(-1f, -4f);
+        slidingArea.offsetMin = new Vector2(1f, 5f);
+        slidingArea.offsetMax = new Vector2(-1f, -5f);
 
         RectTransform handle = new GameObject("Handle", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image)).GetComponent<RectTransform>();
         handle.SetParent(slidingArea, false);
@@ -426,100 +497,110 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         scrollRect.verticalScrollbar = scrollbar;
         scrollRect.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHideAndExpandViewport;
 
-        CreateSectionLabel(content, "统计");
-        CreateInfoCard(content, "Stats", out statsText, out statsCardLayoutElement, StatsCardMinHeight);
+        RectTransform statsSection = CreateSectionCard(content, "统计概览", "实时摘要与单机运行状态。");
+        CreateInfoCard(statsSection, "Stats", out statsText, out statsCardLayoutElement, StatsCardMinHeight);
 
-        CreateSectionLabel(content, "实验中心");
-        CreateStepperRow(content, "分组", out experimentGroupValueText, OnPreviousExperimentGroupClicked, OnNextExperimentGroupClicked, 124f);
-        CreateStepperRow(content, "预设", out experimentPresetValueText, OnPreviousExperimentPresetClicked, OnNextExperimentPresetClicked, 148f);
-        CreateButtonStripRow(content, "矩阵", new[]
+        RectTransform experimentSection = CreateSectionCard(content, "实验中心", "预设矩阵、快速应用与批量运行。");
+        CreateStepperRow(experimentSection, "分组", out experimentGroupValueText, OnPreviousExperimentGroupClicked, OnNextExperimentGroupClicked, 148f);
+        CreateStepperRow(experimentSection, "预设", out experimentPresetValueText, OnPreviousExperimentPresetClicked, OnNextExperimentPresetClicked, 164f);
+        CreateButtonStripRow(experimentSection, "实验矩阵", new[]
         {
             new ButtonAction("调度", new Color(0.14f, 0.44f, 0.70f, 0.98f), SelectSchedulingExperimentGroup, 48f),
             new ButtonAction("规划", new Color(0.16f, 0.48f, 0.66f, 0.98f), SelectPlanningExperimentGroup, 48f),
             new ButtonAction("机群", new Color(0.18f, 0.40f, 0.62f, 0.98f), SelectScalingExperimentGroup, 48f),
             new ButtonAction("密度", new Color(0.12f, 0.36f, 0.54f, 0.98f), SelectDensityExperimentGroup, 48f)
         });
-        CreateInfoCard(content, "ExperimentPresetSummary", out experimentPresetSummaryText, out _, 104f);
-        CreateButtonStripRow(content, "实验", new[]
+        CreateInfoCard(experimentSection, "ExperimentPresetSummary", out experimentPresetSummaryText, out _, 112f);
+        CreateButtonStripRow(experimentSection, "实验执行", new[]
         {
             new ButtonAction("应用预设", SecondaryButtonColor, ApplySelectedExperimentPreset, 72f),
             new ButtonAction("预设批量", PrimaryButtonColor, StartSelectedPresetBatch, 72f),
             new ButtonAction("当前批量", new Color(0.09f, 0.46f, 0.56f, 0.98f), StartBatchExperiments, 72f)
         });
 
-        CreateSectionLabel(content, "结果");
-        CreateInfoCard(content, "ExportDirectory", out exportDirectoryStatusText, out _, 92f);
-        CreateInputButtonRow(content, "目录", out exportDirectoryInputField, new[]
+        RectTransform resultSection = CreateSectionCard(content, "结果与导出", "导出目录、会话管理和当前批量状态。");
+        CreateInfoCard(resultSection, "ExportDirectory", out exportDirectoryStatusText, out _, 96f);
+        CreateInputButtonRow(resultSection, "目录", out exportDirectoryInputField, new[]
         {
             new ButtonAction("选择", new Color(0.13f, 0.44f, 0.64f, 0.98f), BrowseCustomExportDirectory, 48f),
             new ButtonAction("新会话", new Color(0.10f, 0.46f, 0.58f, 0.98f), StartNewExportSession, 60f),
             new ButtonAction("应用", PrimaryButtonColor, ApplyCustomExportDirectory, 48f),
             new ButtonAction("默认", SecondaryButtonColor, ResetExportDirectoryToDefault, 48f)
         });
-        CreateButtonStripRow(content, "导出", new[]
+        CreateButtonStripRow(resultSection, "导出结果", new[]
         {
             new ButtonAction("导出CSV", PrimaryButtonColor, ExportCurrentResultToCsv, 68f),
             new ButtonAction("导出JSON", new Color(0.08f, 0.48f, 0.62f, 0.98f), ExportCurrentResultToJson, 74f)
         });
-        CreateInfoCard(content, "BatchStatus", out batchStatusText, out _, 64f);
-        CreateStepperRow(content, "批次数", out batchRunCountValueText, OnDecreaseBatchRunCountClicked, OnIncreaseBatchRunCountClicked);
-        CreateButtonStripRow(content, "批量", new[]
+        CreateInfoCard(resultSection, "BatchStatus", out batchStatusText, out _, 72f);
+        CreateStepperRow(resultSection, "批次数", out batchRunCountValueText, OnDecreaseBatchRunCountClicked, OnIncreaseBatchRunCountClicked);
+        CreateButtonStripRow(resultSection, "批量实验", new[]
         {
             new ButtonAction("开始", PrimaryButtonColor, StartBatchExperiments, 56f),
             new ButtonAction("停止", SecondaryButtonColor, StopBatchExperiments, 56f)
         });
 
-        CreateSectionLabel(content, "起飞点");
-        CreateButtonStripRow(content, "编辑", new[]
+        RectTransform spawnSection = CreateSectionCard(content, "起飞点", "新增、移动和删除起飞位置。");
+        CreateButtonStripRow(spawnSection, "编辑模式", new[]
         {
             new ButtonAction("新增", PrimaryButtonColor, ToggleSpawnPointPlacement, 48f),
             new ButtonAction("移动", new Color(0.14f, 0.50f, 0.78f, 0.98f), ToggleSpawnPointMove, 48f),
             new ButtonAction("删除", new Color(0.78f, 0.48f, 0.14f, 0.98f), ToggleSpawnPointDeletion, 48f)
         });
-        CreateButtonStripRow(content, "操作", new[]
+        CreateButtonStripRow(spawnSection, "批量操作", new[]
         {
             new ButtonAction("清空", SecondaryButtonColor, ClearSpawnPoints, 56f)
         });
 
-        CreateSectionLabel(content, "算法");
-        CreateStepperRow(content, "调度", out schedulerValueText, OnPreviousSchedulerClicked, OnNextSchedulerClicked);
-        CreateStepperRow(content, "路径", out plannerValueText, OnPreviousPlannerClicked, OnNextPlannerClicked);
+        RectTransform obstacleSection = CreateSectionCard(content, "障碍物", "会话级建筑编辑与障碍模板控制。");
+        CreateButtonStripRow(obstacleSection, "编辑模式", new[]
+        {
+            new ButtonAction("绘制", PrimaryButtonColor, ToggleObstacleCreateMode, 56f),
+            new ButtonAction("删除", new Color(0.78f, 0.48f, 0.14f, 0.98f), ToggleObstacleDeleteMode, 56f)
+        });
+        CreateButtonStripRow(obstacleSection, "批量操作", new[]
+        {
+            new ButtonAction("清空", SecondaryButtonColor, ClearCustomObstacles, 56f)
+        });
+        CreateStepperRow(obstacleSection, "样式", out obstacleStyleValueText, OnPreviousObstacleTemplateClicked, OnNextObstacleTemplateClicked, 156f);
+        CreateStepperRow(obstacleSection, "缩放", out obstacleScaleValueText, OnDecreaseObstacleScaleClicked, OnIncreaseObstacleScaleClicked, 108f);
+        CreateStepperRow(obstacleSection, "高度", out obstacleHeightValueText, OnDecreaseObstacleHeightClicked, OnIncreaseObstacleHeightClicked, 108f);
 
-        CreateSectionLabel(content, "规划");
-        CreateStepperRow(content, "网格", out planningGridValueText, OnDecreasePlanningGridClicked, OnIncreasePlanningGridClicked);
-        CreateStepperRow(content, "X最小", out planningMinXValueText, OnDecreasePlanningMinXClicked, OnIncreasePlanningMinXClicked);
-        CreateStepperRow(content, "X最大", out planningMaxXValueText, OnDecreasePlanningMaxXClicked, OnIncreasePlanningMaxXClicked);
-        CreateStepperRow(content, "Z最小", out planningMinZValueText, OnDecreasePlanningMinZClicked, OnIncreasePlanningMinZClicked);
-        CreateStepperRow(content, "Z最大", out planningMaxZValueText, OnDecreasePlanningMaxZClicked, OnIncreasePlanningMaxZClicked);
-        CreateStepperRow(content, "高最小", out planningMinYValueText, OnDecreasePlanningMinYClicked, OnIncreasePlanningMinYClicked);
-        CreateStepperRow(content, "高最大", out planningMaxYValueText, OnDecreasePlanningMaxYClicked, OnIncreasePlanningMaxYClicked);
-        CreateToggleRow(content, "对角", out diagonalPlanningToggleButton, ToggleDiagonalPlanning);
-        CreateToggleRow(content, "障碍", out obstacleAutoConfigToggleButton, ToggleObstacleAutoConfiguration);
+        RectTransform algorithmSection = CreateSectionCard(content, "算法与规划", "调度、路径规划和搜索边界。");
+        CreateStepperRow(algorithmSection, "调度", out schedulerValueText, OnPreviousSchedulerClicked, OnNextSchedulerClicked, 124f);
+        CreateStepperRow(algorithmSection, "路径", out plannerValueText, OnPreviousPlannerClicked, OnNextPlannerClicked, 124f);
+        CreateStepperRow(algorithmSection, "网格", out planningGridValueText, OnDecreasePlanningGridClicked, OnIncreasePlanningGridClicked);
+        CreateStepperRow(algorithmSection, "X最小", out planningMinXValueText, OnDecreasePlanningMinXClicked, OnIncreasePlanningMinXClicked);
+        CreateStepperRow(algorithmSection, "X最大", out planningMaxXValueText, OnDecreasePlanningMaxXClicked, OnIncreasePlanningMaxXClicked);
+        CreateStepperRow(algorithmSection, "Z最小", out planningMinZValueText, OnDecreasePlanningMinZClicked, OnIncreasePlanningMinZClicked);
+        CreateStepperRow(algorithmSection, "Z最大", out planningMaxZValueText, OnDecreasePlanningMaxZClicked, OnIncreasePlanningMaxZClicked);
+        CreateStepperRow(algorithmSection, "高最小", out planningMinYValueText, OnDecreasePlanningMinYClicked, OnIncreasePlanningMinYClicked);
+        CreateStepperRow(algorithmSection, "高最大", out planningMaxYValueText, OnDecreasePlanningMaxYClicked, OnIncreasePlanningMaxYClicked);
+        CreateToggleRow(algorithmSection, "对角搜索", out diagonalPlanningToggleButton, ToggleDiagonalPlanning);
+        CreateToggleRow(algorithmSection, "障碍自动", out obstacleAutoConfigToggleButton, ToggleObstacleAutoConfiguration);
 
-        CreateSectionLabel(content, "机群");
-        CreateStepperRow(content, "数量", out droneCountValueText, OnDecreaseDroneCountClicked, OnIncreaseDroneCountClicked);
-        CreateStepperRow(content, "速度", out droneSpeedValueText, OnDecreaseDroneSpeedClicked, OnIncreaseDroneSpeedClicked);
-        CreateStepperRow(content, "倍速", out timeScaleValueText, OnDecreaseTimeScaleClicked, OnIncreaseTimeScaleClicked);
-        CreateButtonStripRow(content, "应用", new[]
+        RectTransform fleetSection = CreateSectionCard(content, "机群", "数量、速度和运行倍率。");
+        CreateStepperRow(fleetSection, "数量", out droneCountValueText, OnDecreaseDroneCountClicked, OnIncreaseDroneCountClicked);
+        CreateStepperRow(fleetSection, "速度", out droneSpeedValueText, OnDecreaseDroneSpeedClicked, OnIncreaseDroneSpeedClicked);
+        CreateStepperRow(fleetSection, "倍速", out timeScaleValueText, OnDecreaseTimeScaleClicked, OnIncreaseTimeScaleClicked);
+        CreateButtonStripRow(fleetSection, "应用到机群", new[]
         {
             new ButtonAction("同步", SecondaryButtonColor, SyncAndApplyToCurrentFleet, 64f),
             new ButtonAction("重建", PrimaryButtonColor, RebuildFleet, 64f)
         });
 
-        CreateSectionLabel(content, "显示");
-        CreateToggleRow(content, "规划线", out plannedPathToggleButton, TogglePlannedPath);
-        CreateToggleRow(content, "航迹", out trailToggleButton, ToggleTrailPath);
-
-        CreateSectionLabel(content, "镜头");
-        CreateButtonStripRow(content, "相机", new[]
+        RectTransform displaySection = CreateSectionCard(content, "显示与镜头", "路径显示和视角切换。");
+        CreateToggleRow(displaySection, "规划线", out plannedPathToggleButton, TogglePlannedPath);
+        CreateToggleRow(displaySection, "航迹", out trailToggleButton, ToggleTrailPath);
+        CreateButtonStripRow(displaySection, "视角操作", new[]
         {
             new ButtonAction("总览", SecondaryButtonColor, SwitchToOverviewCamera, 52f),
             new ButtonAction("跟随", PrimaryButtonColor, SwitchToFollowCamera, 52f),
             new ButtonAction("2D俯视", new Color(0.10f, 0.48f, 0.62f, 0.98f), SwitchToTopDownCamera, 64f),
             new ButtonAction("下一架", PrimaryButtonColor, FocusNextDrone, 60f)
         });
-        CreateStepperRow(content, "跟随高", out followHeightValueText, OnDecreaseFollowHeightClicked, OnIncreaseFollowHeightClicked);
-        CreateStepperRow(content, "跟随距", out followDistanceValueText, OnDecreaseFollowDistanceClicked, OnIncreaseFollowDistanceClicked);
+        CreateStepperRow(displaySection, "跟随高", out followHeightValueText, OnDecreaseFollowHeightClicked, OnIncreaseFollowHeightClicked);
+        CreateStepperRow(displaySection, "跟随距", out followDistanceValueText, OnDecreaseFollowDistanceClicked, OnIncreaseFollowDistanceClicked);
 
         LayoutRebuilder.ForceRebuildLayoutImmediate(content);
         scrollRect.verticalNormalizedPosition = 1f;
@@ -573,6 +654,19 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         {
             configuredFollowHeight = Mathf.Clamp(configuredFollowHeight, MinFollowHeight, MaxFollowHeight);
             configuredFollowDistance = Mathf.Clamp(configuredFollowDistance, MinFollowDistance, MaxFollowDistance);
+        }
+
+        if (obstacleEditor != null)
+        {
+            configuredObstacleHeight = Mathf.Clamp(obstacleEditor.defaultObstacleHeight, MinObstacleHeight, MaxObstacleHeight);
+            configuredObstacleScale = Mathf.Clamp(obstacleEditor.GetDefaultObstacleScaleMultiplier(), MinObstacleScale, MaxObstacleScale);
+            configuredObstacleTemplateName = obstacleEditor.GetCurrentTemplateDisplayName();
+        }
+        else
+        {
+            configuredObstacleHeight = Mathf.Clamp(configuredObstacleHeight, MinObstacleHeight, MaxObstacleHeight);
+            configuredObstacleScale = Mathf.Clamp(configuredObstacleScale, MinObstacleScale, MaxObstacleScale);
+            configuredObstacleTemplateName = "长方体";
         }
 
         if (schedulerIndex < 0)
@@ -667,6 +761,21 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
             followDistanceValueText.text = $"{configuredFollowDistance:0.0}m";
         }
 
+        if (obstacleHeightValueText != null)
+        {
+            obstacleHeightValueText.text = $"{configuredObstacleHeight:0.0}m";
+        }
+
+        if (obstacleScaleValueText != null)
+        {
+            obstacleScaleValueText.text = $"{configuredObstacleScale:0.00}x";
+        }
+
+        if (obstacleStyleValueText != null)
+        {
+            obstacleStyleValueText.text = configuredObstacleTemplateName;
+        }
+
         if (batchRunCountValueText != null)
         {
             batchRunCountValueText.text = configuredBatchRunCount.ToString();
@@ -707,6 +816,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         int totalConflictCount = CountTotalConflictEvents();
         int buildingWarningCount = droneManager != null ? droneManager.GetBuildingWarningCount() : 0;
         int spawnPointCount = spawnPointManager != null ? spawnPointManager.GetSpawnPointCount() : 0;
+        int customObstacleCount = obstacleEditor != null ? obstacleEditor.GetCustomObstacleCount() : 0;
         string simulationState = simulationManager != null ? FormatSimulationState(simulationManager.currentState) : "未知";
         string elapsedTime = simulationManager != null ? FormatDuration(simulationManager.ElapsedSimulationTime) : "--:--";
         string cameraMode = "未连接";
@@ -718,9 +828,22 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
             cameraTarget = cameraManager.targetDrone != null ? cameraManager.targetDrone.name : "-";
         }
 
+        if (!isExpanded)
+        {
+            summaryText.enableWordWrapping = false;
+            summaryText.overflowMode = TextOverflowModes.Ellipsis;
+            summaryText.alignment = TextAlignmentOptions.Left;
+            summaryText.text = $"状态 {simulationState}  用时 {elapsedTime}  任务 {completedTaskCount}/{totalTaskCount}  机群 {droneCount}  冲突 {totalConflictCount}";
+            RefreshStats(taskPoints, cameraTarget);
+            return;
+        }
+
+        summaryText.enableWordWrapping = true;
+        summaryText.overflowMode = TextOverflowModes.Overflow;
+        summaryText.alignment = TextAlignmentOptions.TopLeft;
         summaryText.text =
             $"状态 {simulationState}  用时 {elapsedTime}  任务 {completedTaskCount}/{totalTaskCount}\n" +
-            $"镜头 {cameraMode}  目标 {cameraTarget}  等待 {waitingDroneCount}  冲突 {totalConflictCount}  建筑告警 {buildingWarningCount}  机群 {droneCount}  起点 {spawnPointCount}";
+            $"镜头 {cameraMode}  目标 {cameraTarget}  等待 {waitingDroneCount}  冲突 {totalConflictCount}  建筑告警 {buildingWarningCount}  机群 {droneCount}  起点 {spawnPointCount}  自定义障碍 {customObstacleCount}";
 
         RefreshStats(taskPoints, cameraTarget);
     }
@@ -843,7 +966,13 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
             return;
         }
 
-        panelRoot.sizeDelta = isExpanded ? expandedSize : collapsedSize;
+        panelRoot.sizeDelta = GetTargetPanelSize();
+
+        if (summaryCardRoot != null)
+        {
+            summaryCardRoot.offsetMin = new Vector2(12f, isExpanded ? -108f : -116f);
+            summaryCardRoot.offsetMax = new Vector2(-12f, -50f);
+        }
 
         if (bodyRoot != null)
         {
@@ -854,6 +983,15 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         {
             footerRoot.gameObject.SetActive(isExpanded);
         }
+
+        if (!isExpanded && summaryText != null)
+        {
+            summaryText.enableWordWrapping = false;
+            summaryText.overflowMode = TextOverflowModes.Ellipsis;
+            summaryText.alignment = TextAlignmentOptions.Left;
+        }
+
+        LayoutRebuilder.ForceRebuildLayoutImmediate(panelRoot);
     }
 
     private void OnPreviousSchedulerClicked()
@@ -1901,6 +2039,152 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         RefreshSummary();
     }
 
+    private void ToggleObstacleCreateMode()
+    {
+        if (obstacleEditor == null)
+        {
+            transientMessage = "未找到障碍物编辑器";
+            RefreshAllLabels();
+            return;
+        }
+
+        if (simulationManager != null && simulationManager.currentState != SimulationState.Idle)
+        {
+            transientMessage = "障碍物仅可在 Idle 状态编辑";
+            RefreshAllLabels();
+            return;
+        }
+
+        obstacleEditor.ToggleCreateMode();
+        transientMessage = obstacleEditor.IsCreateMode
+            ? "已进入障碍物绘制模式，拖拽地面生成建筑"
+            : "已退出障碍物绘制模式";
+        RefreshAllLabels();
+        RefreshSummary();
+    }
+
+    private void ToggleObstacleDeleteMode()
+    {
+        if (obstacleEditor == null)
+        {
+            transientMessage = "未找到障碍物编辑器";
+            RefreshAllLabels();
+            return;
+        }
+
+        if (simulationManager != null && simulationManager.currentState != SimulationState.Idle)
+        {
+            transientMessage = "障碍物仅可在 Idle 状态编辑";
+            RefreshAllLabels();
+            return;
+        }
+
+        obstacleEditor.ToggleDeleteMode();
+        transientMessage = obstacleEditor.IsDeleteMode
+            ? "已进入障碍物删除模式，点击自定义建筑删除"
+            : "已退出障碍物删除模式";
+        RefreshAllLabels();
+        RefreshSummary();
+    }
+
+    private void ClearCustomObstacles()
+    {
+        if (obstacleEditor == null)
+        {
+            transientMessage = "未找到障碍物编辑器";
+            RefreshAllLabels();
+            return;
+        }
+
+        if (simulationManager != null && simulationManager.currentState != SimulationState.Idle)
+        {
+            transientMessage = "障碍物仅可在 Idle 状态编辑";
+            RefreshAllLabels();
+            return;
+        }
+
+        obstacleEditor.ClearCustomObstacles();
+        transientMessage = "已清空自定义障碍物";
+        RefreshAllLabels();
+        RefreshSummary();
+    }
+
+    private void OnDecreaseObstacleHeightClicked()
+    {
+        configuredObstacleHeight = Mathf.Clamp(configuredObstacleHeight - ObstacleHeightStep, MinObstacleHeight, MaxObstacleHeight);
+        obstacleEditor?.SetDefaultObstacleHeight(configuredObstacleHeight);
+        transientMessage = $"默认障碍高度 {configuredObstacleHeight:0.0}m";
+        RefreshAllLabels();
+    }
+
+    private void OnIncreaseObstacleHeightClicked()
+    {
+        configuredObstacleHeight = Mathf.Clamp(configuredObstacleHeight + ObstacleHeightStep, MinObstacleHeight, MaxObstacleHeight);
+        obstacleEditor?.SetDefaultObstacleHeight(configuredObstacleHeight);
+        transientMessage = $"默认障碍高度 {configuredObstacleHeight:0.0}m";
+        RefreshAllLabels();
+    }
+
+    private void OnDecreaseObstacleScaleClicked()
+    {
+        configuredObstacleScale = Mathf.Clamp(configuredObstacleScale - ObstacleScaleStep, MinObstacleScale, MaxObstacleScale);
+        obstacleEditor?.SetDefaultObstacleScaleMultiplier(configuredObstacleScale);
+        transientMessage = $"默认障碍缩放 {configuredObstacleScale:0.00}x";
+        RefreshAllLabels();
+    }
+
+    private void OnIncreaseObstacleScaleClicked()
+    {
+        configuredObstacleScale = Mathf.Clamp(configuredObstacleScale + ObstacleScaleStep, MinObstacleScale, MaxObstacleScale);
+        obstacleEditor?.SetDefaultObstacleScaleMultiplier(configuredObstacleScale);
+        transientMessage = $"默认障碍缩放 {configuredObstacleScale:0.00}x";
+        RefreshAllLabels();
+    }
+
+    private void OnPreviousObstacleTemplateClicked()
+    {
+        if (obstacleEditor == null)
+        {
+            transientMessage = "未找到障碍物编辑器";
+            RefreshAllLabels();
+            return;
+        }
+
+        if (simulationManager != null && simulationManager.currentState != SimulationState.Idle)
+        {
+            transientMessage = "障碍物仅可在 Idle 状态编辑";
+            RefreshAllLabels();
+            return;
+        }
+
+        obstacleEditor.SelectPreviousTemplate();
+        configuredObstacleTemplateName = obstacleEditor.GetCurrentTemplateDisplayName();
+        transientMessage = $"障碍样式 {configuredObstacleTemplateName}";
+        RefreshAllLabels();
+    }
+
+    private void OnNextObstacleTemplateClicked()
+    {
+        if (obstacleEditor == null)
+        {
+            transientMessage = "未找到障碍物编辑器";
+            RefreshAllLabels();
+            return;
+        }
+
+        if (simulationManager != null && simulationManager.currentState != SimulationState.Idle)
+        {
+            transientMessage = "障碍物仅可在 Idle 状态编辑";
+            RefreshAllLabels();
+            return;
+        }
+
+        obstacleEditor.SelectNextTemplate();
+        configuredObstacleTemplateName = obstacleEditor.GetCurrentTemplateDisplayName();
+        transientMessage = $"障碍样式 {configuredObstacleTemplateName}";
+        RefreshAllLabels();
+    }
+
     private Canvas ResolveCanvas()
     {
         if (simulationManager != null && simulationManager.statusText != null)
@@ -1909,6 +2193,79 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         }
 
         return FindObjectOfType<Canvas>();
+    }
+
+    private Vector2 GetCanvasSize()
+    {
+        Canvas canvas = ResolveCanvas();
+        RectTransform canvasRect = canvas != null ? canvas.transform as RectTransform : null;
+        return canvasRect != null ? canvasRect.rect.size : expandedSize;
+    }
+
+    private Vector2 GetTargetPanelSize()
+    {
+        Vector2 canvasSize = GetCanvasSize();
+        float width = Mathf.Clamp(canvasSize.x * 0.235f, expandedSize.x, 432f);
+        float expandedHeight = Mathf.Clamp(canvasSize.y - 236f, 520f, 760f);
+        float collapsedHeight = Mathf.Max(collapsedSize.y, 108f);
+        return isExpanded
+            ? new Vector2(width, expandedHeight)
+            : new Vector2(width, collapsedHeight);
+    }
+
+    private RectTransform CreateSectionCard(RectTransform parent, string title, string description)
+    {
+        GameObject cardObject = new GameObject("SectionCard_" + title, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Outline));
+        RectTransform card = cardObject.GetComponent<RectTransform>();
+        card.SetParent(parent, false);
+
+        Image cardImage = card.GetComponent<Image>();
+        ConfigureImageGraphic(cardImage);
+        cardImage.color = SectionColor;
+        cardImage.raycastTarget = false;
+
+        Outline outline = card.GetComponent<Outline>();
+        outline.effectColor = new Color(0.12f, 0.34f, 0.44f, 0.18f);
+        outline.effectDistance = new Vector2(1f, -1f);
+        outline.useGraphicAlpha = true;
+
+        VerticalLayoutGroup layout = card.gameObject.AddComponent<VerticalLayoutGroup>();
+        layout.padding = new RectOffset(12, 12, 12, 12);
+        layout.spacing = 8f;
+        layout.childAlignment = TextAnchor.UpperLeft;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = true;
+        layout.childForceExpandHeight = false;
+
+        ContentSizeFitter fitter = card.gameObject.AddComponent<ContentSizeFitter>();
+        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        TMP_Text titleText = CreateText("Title", card, title, 13f, AccentColor, FontStyles.Bold);
+        titleText.alignment = TextAlignmentOptions.Left;
+        titleText.enableWordWrapping = false;
+
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            TMP_Text descriptionText = CreateText("Description", card, description, 11f, SecondaryTextColor, FontStyles.Normal);
+            descriptionText.alignment = TextAlignmentOptions.Left;
+            descriptionText.enableWordWrapping = true;
+            descriptionText.overflowMode = TextOverflowModes.Overflow;
+        }
+
+        RectTransform contentRoot = new GameObject("Content", typeof(RectTransform)).GetComponent<RectTransform>();
+        contentRoot.SetParent(card, false);
+        VerticalLayoutGroup contentLayout = contentRoot.gameObject.AddComponent<VerticalLayoutGroup>();
+        contentLayout.spacing = 6f;
+        contentLayout.childAlignment = TextAnchor.UpperLeft;
+        contentLayout.childControlWidth = true;
+        contentLayout.childControlHeight = true;
+        contentLayout.childForceExpandWidth = true;
+        contentLayout.childForceExpandHeight = false;
+
+        ContentSizeFitter contentFitter = contentRoot.gameObject.AddComponent<ContentSizeFitter>();
+        contentFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        return contentRoot;
     }
 
     private void CreateSectionLabel(RectTransform parent, string label)
@@ -1954,15 +2311,53 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     private void CreateToggleRow(RectTransform parent, string label, out Button toggleButton, Action onClicked)
     {
         RectTransform row = CreateRow(parent, label);
-        toggleButton = CreateActionButton(row, "ON", PositiveButtonColor, onClicked, 60f);
+        toggleButton = CreateActionButton(row, "ON", PositiveButtonColor, onClicked, 72f);
     }
 
     private void CreateButtonStripRow(RectTransform parent, string label, ButtonAction[] actions)
     {
-        RectTransform row = CreateRow(parent, label);
+        GameObject rowObject = new GameObject("ActionRow_" + label, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        RectTransform row = rowObject.GetComponent<RectTransform>();
+        row.SetParent(parent, false);
+
+        LayoutElement rowLayout = row.gameObject.AddComponent<LayoutElement>();
+        rowLayout.preferredHeight = actions.Length >= 4 ? 86f : 74f;
+        rowLayout.minHeight = rowLayout.preferredHeight;
+
+        Image rowImage = row.GetComponent<Image>();
+        ConfigureImageGraphic(rowImage);
+        rowImage.color = RowColor;
+        rowImage.raycastTarget = false;
+
+        VerticalLayoutGroup verticalLayout = row.gameObject.AddComponent<VerticalLayoutGroup>();
+        verticalLayout.padding = new RectOffset(10, 10, 7, 7);
+        verticalLayout.spacing = 6f;
+        verticalLayout.childAlignment = TextAnchor.UpperLeft;
+        verticalLayout.childControlWidth = true;
+        verticalLayout.childControlHeight = true;
+        verticalLayout.childForceExpandWidth = true;
+        verticalLayout.childForceExpandHeight = false;
+
+        TMP_Text labelText = CreateText("Label", row, label, 12f, SecondaryTextColor, FontStyles.Bold);
+        labelText.alignment = TextAlignmentOptions.Left;
+        labelText.enableWordWrapping = false;
+
+        RectTransform buttonRow = new GameObject("Buttons", typeof(RectTransform)).GetComponent<RectTransform>();
+        buttonRow.SetParent(row, false);
+        HorizontalLayoutGroup buttonLayout = buttonRow.gameObject.AddComponent<HorizontalLayoutGroup>();
+        buttonLayout.spacing = 6f;
+        buttonLayout.childAlignment = TextAnchor.MiddleCenter;
+        buttonLayout.childControlWidth = true;
+        buttonLayout.childControlHeight = true;
+        buttonLayout.childForceExpandWidth = true;
+        buttonLayout.childForceExpandHeight = false;
+
+        LayoutElement buttonRowLayout = buttonRow.gameObject.AddComponent<LayoutElement>();
+        buttonRowLayout.preferredHeight = 34f;
+
         for (int i = 0; i < actions.Length; i++)
         {
-            CreateActionButton(row, actions[i].label, actions[i].color, actions[i].callback, actions[i].width);
+            CreateActionButton(buttonRow, actions[i].label, actions[i].color, actions[i].callback, actions[i].width, flexibleWidth: true);
         }
     }
 
@@ -1977,8 +2372,8 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         row.SetParent(parent, false);
 
         LayoutElement rowLayout = row.gameObject.AddComponent<LayoutElement>();
-        rowLayout.preferredHeight = 62f;
-        rowLayout.minHeight = 62f;
+        rowLayout.preferredHeight = 96f;
+        rowLayout.minHeight = 96f;
 
         Image rowImage = row.GetComponent<Image>();
         ConfigureImageGraphic(rowImage);
@@ -1986,8 +2381,8 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         rowImage.raycastTarget = false;
 
         VerticalLayoutGroup verticalLayout = row.gameObject.AddComponent<VerticalLayoutGroup>();
-        verticalLayout.padding = new RectOffset(8, 8, 4, 4);
-        verticalLayout.spacing = 4f;
+        verticalLayout.padding = new RectOffset(10, 10, 8, 8);
+        verticalLayout.spacing = 6f;
         verticalLayout.childAlignment = TextAnchor.UpperLeft;
         verticalLayout.childControlWidth = true;
         verticalLayout.childControlHeight = true;
@@ -1997,19 +2392,19 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         RectTransform inputRow = new GameObject("InputRow", typeof(RectTransform)).GetComponent<RectTransform>();
         inputRow.SetParent(row, false);
         HorizontalLayoutGroup inputLayout = inputRow.gameObject.AddComponent<HorizontalLayoutGroup>();
-        inputLayout.spacing = 4f;
+        inputLayout.spacing = 6f;
         inputLayout.childAlignment = TextAnchor.MiddleLeft;
         inputLayout.childControlWidth = true;
         inputLayout.childControlHeight = true;
-        inputLayout.childForceExpandWidth = false;
+        inputLayout.childForceExpandWidth = true;
         inputLayout.childForceExpandHeight = false;
         LayoutElement inputRowLayout = inputRow.gameObject.AddComponent<LayoutElement>();
-        inputRowLayout.preferredHeight = 24f;
+        inputRowLayout.preferredHeight = 28f;
 
-        TMP_Text labelText = CreateText("Label", inputRow, label, 14f, PrimaryTextColor, FontStyles.Normal);
+        TMP_Text labelText = CreateText("Label", inputRow, label, 13f, SecondaryTextColor, FontStyles.Bold);
         LayoutElement labelLayout = labelText.gameObject.AddComponent<LayoutElement>();
-        labelLayout.preferredWidth = 40f;
-        labelLayout.minWidth = 40f;
+        labelLayout.preferredWidth = 52f;
+        labelLayout.minWidth = 52f;
         labelLayout.flexibleWidth = 0f;
         labelText.alignment = TextAlignmentOptions.Left;
 
@@ -2018,24 +2413,18 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         RectTransform buttonRow = new GameObject("ButtonRow", typeof(RectTransform)).GetComponent<RectTransform>();
         buttonRow.SetParent(row, false);
         HorizontalLayoutGroup buttonLayout = buttonRow.gameObject.AddComponent<HorizontalLayoutGroup>();
-        buttonLayout.spacing = 4f;
+        buttonLayout.spacing = 6f;
         buttonLayout.childAlignment = TextAnchor.MiddleRight;
         buttonLayout.childControlWidth = true;
         buttonLayout.childControlHeight = true;
-        buttonLayout.childForceExpandWidth = false;
+        buttonLayout.childForceExpandWidth = true;
         buttonLayout.childForceExpandHeight = false;
         LayoutElement buttonRowLayout = buttonRow.gameObject.AddComponent<LayoutElement>();
-        buttonRowLayout.preferredHeight = 24f;
-
-        GameObject spacer = new GameObject("Spacer", typeof(RectTransform));
-        spacer.transform.SetParent(buttonRow, false);
-        LayoutElement spacerLayout = spacer.AddComponent<LayoutElement>();
-        spacerLayout.flexibleWidth = 1f;
-        spacerLayout.minWidth = 0f;
+        buttonRowLayout.preferredHeight = 32f;
 
         for (int i = 0; i < actions.Length; i++)
         {
-            CreateActionButton(buttonRow, actions[i].label, actions[i].color, actions[i].callback, actions[i].width);
+            CreateActionButton(buttonRow, actions[i].label, actions[i].color, actions[i].callback, actions[i].width, flexibleWidth: true);
         }
     }
 
@@ -2061,6 +2450,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
 
         bodyText = CreateText("BodyText", card, string.Empty, 12.5f, PrimaryTextColor, FontStyles.Normal);
         bodyText.enableWordWrapping = true;
+        bodyText.overflowMode = TextOverflowModes.Overflow;
         bodyText.alignment = TextAlignmentOptions.TopLeft;
         bodyText.rectTransform.anchorMin = Vector2.zero;
         bodyText.rectTransform.anchorMax = Vector2.one;
@@ -2075,7 +2465,8 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         row.SetParent(parent, false);
 
         LayoutElement layoutElement = row.gameObject.AddComponent<LayoutElement>();
-        layoutElement.preferredHeight = 34f;
+        layoutElement.preferredHeight = 40f;
+        layoutElement.minHeight = 40f;
 
         Image rowImage = row.GetComponent<Image>();
         ConfigureImageGraphic(rowImage);
@@ -2083,18 +2474,18 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         rowImage.raycastTarget = false;
 
         HorizontalLayoutGroup layout = row.gameObject.AddComponent<HorizontalLayoutGroup>();
-        layout.padding = new RectOffset(8, 8, 4, 4);
-        layout.spacing = 4f;
+        layout.padding = new RectOffset(10, 10, 6, 6);
+        layout.spacing = 6f;
         layout.childAlignment = TextAnchor.MiddleLeft;
         layout.childControlWidth = true;
         layout.childControlHeight = true;
         layout.childForceExpandWidth = false;
         layout.childForceExpandHeight = false;
 
-        TMP_Text labelText = CreateText("Label", row, label, 14f, PrimaryTextColor, FontStyles.Normal);
+        TMP_Text labelText = CreateText("Label", row, label, 13f, SecondaryTextColor, FontStyles.Bold);
         LayoutElement labelLayout = labelText.gameObject.AddComponent<LayoutElement>();
-        labelLayout.preferredWidth = 40f;
-        labelLayout.minWidth = 40f;
+        labelLayout.preferredWidth = 62f;
+        labelLayout.minWidth = 62f;
         labelLayout.flexibleWidth = 0f;
         labelText.alignment = TextAlignmentOptions.Left;
 
@@ -2114,11 +2505,15 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
 
         LayoutElement layout = badge.gameObject.AddComponent<LayoutElement>();
         layout.preferredWidth = width;
-        layout.minWidth = width;
-        layout.preferredHeight = 24f;
+        layout.minWidth = Mathf.Min(88f, width);
+        layout.preferredHeight = 28f;
+        layout.flexibleWidth = 1f;
 
-        TMP_Text valueText = CreateText("ValueText", badge, "-", 13f, AccentColor, FontStyles.Bold);
+        TMP_Text valueText = CreateText("ValueText", badge, "-", 12.5f, AccentColor, FontStyles.Bold);
         valueText.alignment = TextAlignmentOptions.Center;
+        valueText.enableAutoSizing = true;
+        valueText.fontSizeMin = 10f;
+        valueText.fontSizeMax = 12.5f;
         valueText.rectTransform.anchorMin = Vector2.zero;
         valueText.rectTransform.anchorMax = Vector2.one;
         valueText.rectTransform.offsetMin = Vector2.zero;
@@ -2134,8 +2529,8 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
 
         LayoutElement layout = inputObject.AddComponent<LayoutElement>();
         layout.flexibleWidth = 1f;
-        layout.minWidth = 130f;
-        layout.preferredHeight = 24f;
+        layout.minWidth = 150f;
+        layout.preferredHeight = 28f;
 
         Image image = inputObject.GetComponent<Image>();
         ConfigureImageGraphic(image);
@@ -2188,7 +2583,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         return inputField;
     }
 
-    private Button CreateActionButton(RectTransform parent, string label, Color color, Action onClicked, float width)
+    private Button CreateActionButton(RectTransform parent, string label, Color color, Action onClicked, float width, bool flexibleWidth = false)
     {
         GameObject buttonObject = new GameObject(label + "_Button", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
         RectTransform rect = buttonObject.GetComponent<RectTransform>();
@@ -2196,7 +2591,9 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
 
         LayoutElement layout = buttonObject.AddComponent<LayoutElement>();
         layout.preferredWidth = width;
-        layout.preferredHeight = 24f;
+        layout.minWidth = flexibleWidth ? 0f : width;
+        layout.flexibleWidth = flexibleWidth ? 1f : 0f;
+        layout.preferredHeight = 28f;
 
         Image image = buttonObject.GetComponent<Image>();
         ConfigureImageGraphic(image);
@@ -2213,10 +2610,13 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
 
         TMP_Text buttonText = CreateText("Label", rect, label, 12f, PrimaryTextColor, FontStyles.Bold);
         buttonText.alignment = TextAlignmentOptions.Center;
+        buttonText.enableAutoSizing = true;
+        buttonText.fontSizeMin = 9f;
+        buttonText.fontSizeMax = 12f;
         buttonText.rectTransform.anchorMin = Vector2.zero;
         buttonText.rectTransform.anchorMax = Vector2.one;
-        buttonText.rectTransform.offsetMin = Vector2.zero;
-        buttonText.rectTransform.offsetMax = Vector2.zero;
+        buttonText.rectTransform.offsetMin = new Vector2(4f, 0f);
+        buttonText.rectTransform.offsetMax = new Vector2(-4f, 0f);
         return button;
     }
 
@@ -2255,6 +2655,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         text.margin = Vector4.zero;
         text.raycastTarget = false;
         text.enableWordWrapping = false;
+        text.overflowMode = TextOverflowModes.Ellipsis;
         if (runtimeFont != null)
         {
             text.font = runtimeFont;

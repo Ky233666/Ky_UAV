@@ -8,6 +8,7 @@ public static class KyUavDeliveryAssetTools
 {
     private const string MainScenePath = "Assets/Scenes/Main/MainScene.unity";
     private const string DroneConfigAssetPath = "Assets/Resources/Configs/DroneConfig_Default.asset";
+    private const string RuntimeObstacleCatalogAssetPath = "Assets/Resources/Configs/RuntimeObstacleCatalog_Default.asset";
     private const string PresetRootDirectory = "Assets/Resources/ExperimentPresets";
 
     [MenuItem("Tools/KY UAV/Bootstrap Delivery Assets")]
@@ -23,6 +24,7 @@ public static class KyUavDeliveryAssetTools
         EnsureFolder(PresetRootDirectory);
 
         DroneConfig droneConfig = EnsureDroneConfig();
+        EnsureRuntimeObstacleCatalog();
         GenerateExperimentPresets(droneConfig);
 
         AssetDatabase.SaveAssets();
@@ -42,6 +44,40 @@ public static class KyUavDeliveryAssetTools
         AssetDatabase.CreateAsset(config, DroneConfigAssetPath);
         EditorUtility.SetDirty(config);
         return config;
+    }
+
+    private static RuntimeObstacleCatalog EnsureRuntimeObstacleCatalog()
+    {
+        RuntimeObstacleCatalog catalog = AssetDatabase.LoadAssetAtPath<RuntimeObstacleCatalog>(RuntimeObstacleCatalogAssetPath);
+        if (catalog == null)
+        {
+            catalog = ScriptableObject.CreateInstance<RuntimeObstacleCatalog>();
+            AssetDatabase.CreateAsset(catalog, RuntimeObstacleCatalogAssetPath);
+        }
+
+        catalog.entries = new[]
+        {
+            BuildObstacleCatalogEntry("城市长楼 01", "Assets/SimpleCityPackage/Prefab/Building/Building 03.prefab"),
+            BuildObstacleCatalogEntry("城市长楼 02", "Assets/SimpleCityPackage/Prefab/Building/Building 07.prefab"),
+            BuildObstacleCatalogEntry("城市方楼 01", "Assets/SimpleCityPackage/Prefab/Building/Building 12.prefab"),
+            BuildObstacleCatalogEntry("城市方楼 02", "Assets/SimpleCityPackage/Prefab/Building/Building 18.prefab"),
+            BuildObstacleCatalogEntry("城市高楼 01", "Assets/SimpleCityPackage/Prefab/Building/Building 24.prefab"),
+            BuildObstacleCatalogEntry("城市高楼 02", "Assets/SimpleCityPackage/Prefab/Building/Building 29.prefab"),
+            BuildObstacleCatalogEntry("城市高楼 03", "Assets/SimpleCityPackage/Prefab/Building/Building 21.prefab")
+        };
+
+        EditorUtility.SetDirty(catalog);
+        return catalog;
+    }
+
+    private static RuntimeObstacleCatalog.Entry BuildObstacleCatalogEntry(string displayName, string prefabPath)
+    {
+        return new RuntimeObstacleCatalog.Entry
+        {
+            displayName = displayName,
+            prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath),
+            preserveAspect = true
+        };
     }
 
     private static void GenerateExperimentPresets(DroneConfig droneConfig)

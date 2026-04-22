@@ -41,6 +41,22 @@ public class DroneStateMachine : MonoBehaviour
     [Tooltip("等待时用于轻微后退拉开距离的速度。")]
     public float avoidanceRetreatSpeed = 1.8f;
 
+    [Header("静态障碍保护")]
+    [Tooltip("是否在飞行过程中做前向建筑阻挡检测。")]
+    public bool enableObstacleGuard = true;
+
+    [Tooltip("前向建筑检测的水平半径。")]
+    public float obstacleGuardPadding = 0.35f;
+
+    [Tooltip("前向建筑检测的垂直半径。")]
+    public float obstacleGuardVerticalPadding = 0.35f;
+
+    [Tooltip("靠近建筑时预留的停止距离。")]
+    public float obstacleStopClearance = 0.12f;
+
+    [Tooltip("建筑阻挡后再次尝试重规划的冷却时间。")]
+    public float obstacleReplanCooldown = 0.5f;
+
     /// <summary>
     /// 状态进入事件
     /// </summary>
@@ -64,6 +80,7 @@ public class DroneStateMachine : MonoBehaviour
 
     // 当前冲突片段标识，用于避免同一轮持续阻塞重复计数
     private string activeConflictKey = string.Empty;
+    private float lastObstacleReplanTime = -100f;
 
     void Awake()
     {
@@ -277,8 +294,20 @@ public class DroneStateMachine : MonoBehaviour
         direction.Normalize();
         float desiredStep = droneController.speed * Time.deltaTime;
         float safeStep = ComputeSafeMovementStep(direction, desiredStep, out DroneController separationBlocker);
+        float obstacleSafeStep = ComputeObstacleSafeMovementStep(direction, desiredStep, out RaycastHit obstacleHit);
+        if (obstacleSafeStep < safeStep)
+        {
+            safeStep = obstacleSafeStep;
+            separationBlocker = null;
+        }
+
         if (safeStep <= 0.001f)
         {
+            if (obstacleHit.collider != null && TryResolveObstacleBlockage(obstacleHit))
+            {
+                return;
+            }
+
             string blockerName = separationBlocker != null ? separationBlocker.droneName : "前方无人机";
             string reason = $"前方占用 {blockerName}";
             RegisterConflict(
@@ -443,28 +472,30 @@ public class DroneStateMachine : MonoBehaviour
         return currentState == DroneState.Idle || currentState == DroneState.Finished;
     }
 
-    private void TryPlanAndPrepareCurrentTaskPath()
+    private bool TryPlanAndPrepareCurrentTaskPath(bool preferObstacleAwarePlanner = false)
     {
         if (droneData == null || droneController == null)
         {
-            return;
+            return false;
         }
 
         TaskPoint currentTask = droneData.GetCurrentTask();
         if (currentTask == null)
         {
-            return;
+            return false;
         }
 
         if (DroneManager.Instance != null)
         {
-            PathPlanningResult pathResult = DroneManager.Instance.PlanPathForTask(droneData.droneId, currentTask);
+            PathPlanningResult pathResult = preferObstacleAwarePlanner
+                ? DroneManager.Instance.PlanPathForTaskPreferObstacleAware(droneData.droneId, currentTask)
+                : DroneManager.Instance.PlanPathForTask(droneData.droneId, currentTask);
             if (pathResult.HasPath())
             {
                 droneData.currentWaypointIndex = pathResult.waypoints.Count > 1 ? 1 : 0;
                 droneController.SetTargetPosition(pathResult.waypoints[droneData.currentWaypointIndex]);
                 droneController.hasArrived = false;
-                return;
+                return true;
             }
         }
 
@@ -472,6 +503,7 @@ public class DroneStateMachine : MonoBehaviour
         droneData.currentWaypointIndex = 0;
         droneController.SetTarget(currentTask.transform);
         droneController.hasArrived = false;
+        return false;
     }
 
     private void StartCurrentTaskIfNeeded()
@@ -598,6 +630,74 @@ public class DroneStateMachine : MonoBehaviour
         }
 
         return safeStep;
+    }
+
+    private float ComputeObstacleSafeMovementStep(
+        Vector3 direction,
+        float desiredStep,
+        out RaycastHit obstacleHit)
+    {
+        obstacleHit = default;
+
+        if (!enableObstacleGuard || droneController == null || DroneManager.Instance == null)
+        {
+            return desiredStep;
+        }
+
+        Vector3 from = droneController.transform.position;
+        Vector3 to = from + direction * (desiredStep + obstacleStopClearance);
+        if (!DroneManager.Instance.IsMovementSegmentBlockedByObstacle(
+                from,
+                to,
+                obstacleGuardPadding,
+                obstacleGuardVerticalPadding,
+                out obstacleHit))
+        {
+            return desiredStep;
+        }
+
+        return Mathf.Max(0f, obstacleHit.distance - obstacleStopClearance);
+    }
+
+    private bool TryResolveObstacleBlockage(RaycastHit obstacleHit)
+    {
+        if (droneController == null || droneData == null)
+        {
+            return false;
+        }
+
+        TaskPoint currentTask = droneData.GetCurrentTask();
+        string obstacleName = obstacleHit.collider != null
+            ? obstacleHit.collider.transform.root.name
+            : "建筑";
+
+        if (currentTask != null && Time.time - lastObstacleReplanTime >= obstacleReplanCooldown)
+        {
+            lastObstacleReplanTime = Time.time;
+
+            if (TryPlanAndPrepareCurrentTaskPath(preferObstacleAwarePlanner: true) &&
+                TryGetActiveTargetPosition(out Vector3 replannedTarget))
+            {
+                Vector3 replannedDirection = replannedTarget - droneController.transform.position;
+                if (replannedDirection.sqrMagnitude > 0.0001f)
+                {
+                    replannedDirection.Normalize();
+                    if (ComputeObstacleSafeMovementStep(
+                            replannedDirection,
+                            droneController.speed * Time.deltaTime,
+                            out _) > 0.001f)
+                    {
+                        ClearActiveConflict();
+                        return false;
+                    }
+                }
+            }
+        }
+
+        string reason = $"前方建筑阻挡 {obstacleName}";
+        RegisterConflict("obstacle:static", reason);
+        SetWaiting(reason);
+        return true;
     }
 
     private void ApplyWaitingRetreatIfNeeded()

@@ -44,10 +44,19 @@
 - [x] 运行 Unity batchmode 初始化资产并执行烟雾验证。
 - [x] 根据验证结果补最后一轮 README 与现状文档校准。
 
+## Phase 6
+- [x] 新增 `RuntimeObstacleEditor`，支持运行时自定义障碍物绘制、删除、清空与高度调整。
+- [x] 在 `SimulationRuntimeControlPanel` 中新增“障碍物”区，接入障碍物编辑与摘要统计。
+- [x] 新增 `KyUavSandboxSceneTools`，可从 `MainScene` 复制生成 `CustomObstacleSandbox.unity`，并清空默认建筑与任务点。
+- [x] 新增 EditMode 回归用例，验证自定义障碍物实验场景可生成且保留主流程依赖。
+
 ## 自动化验证记录
 - 2026-04-10：`KyUavDeliveryAssetTools.BootstrapDeliveryAssets` batchmode 执行通过，默认 `DroneConfig` 与实验预设资产已生成到 `Assets/Resources/Configs`、`Assets/Resources/ExperimentPresets`。
 - 2026-04-10：`ProjectSmokeValidator.RunSmokeValidation` batchmode 执行通过，`MainScene`、核心对象和关键引用检查全部通过。
 - 2026-04-10：EditMode 测试执行通过，结果文件位于 `Library/Logs/editmode-results.xml`，共 `6` 项测试，`6` 项通过。
+- 2026-04-21：`KyUavSandboxSceneTools.CreateOrRefreshCustomObstacleSandboxSceneBatch` batchmode 执行通过，已生成 `Assets/Scenes/Sandbox/CustomObstacleSandbox.unity`。
+- 2026-04-21：`ProjectSmokeValidator.RunSmokeValidation` 在障碍物编辑功能接入后复跑通过，日志位于 `Library/Logs/smoke-after-obstacle-feature-20260421d.log`。
+- 2026-04-21：EditMode 测试复跑通过，结果文件位于 `Library/Logs/editmode-results.xml`，共 `9` 项测试，`9` 项通过。
 - 当前仍需人工执行的内容保留在功能测试表和稳定性记录模板中，不由 batchmode 自动替代。
 
 ## 固定实验矩阵
@@ -58,6 +67,8 @@
 
 ## 验收出口
 - 烟雾验证通过：主场景、核心对象、关键引用均存在。
+- 自定义障碍物实验场景可生成：`CustomObstacleSandbox.unity` 可自动刷新并保留原有主流程依赖。
+- 运行时障碍物编辑入口已接入：绘制、删除、清空和高度调整出现在右侧运行时控制面板。
 - 主流程验证通过：开始、暂停、继续、重置、重建机群、导出、批量实验无阻塞性错误。
 - 实验导出通过：CSV、JSON、session manifest、session summary 均能生成。
 - 文档齐套：执行计划、功能测试表、稳定性记录、实验说明、答辩脚本均在仓库内可直接查阅。

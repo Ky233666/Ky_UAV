@@ -13,8 +13,8 @@
 
 | 层级 | 主要内容 | 代表文件 | 作用 |
 | --- | --- | --- | --- |
-| 场景与资源层 | 主场景、城市环境、任务 CSV、默认配置、实验预设 | `Assets/Scenes/Main/MainScene.unity`、`Assets/Resources/*` | 提供运行资源和默认数据 |
-| 交互与界面层 | 场景 Canvas、运行时控制面板、任务点和起飞点交互 | `TaskPointUIManager.cs`、`DroneSpawnPointUIManager.cs`、`SimulationRuntimeControlPanel.cs` | 提供用户输入入口 |
+| 场景与资源层 | 主场景、sandbox 场景、城市环境、任务 CSV、默认配置、实验预设 | `Assets/Scenes/Main/MainScene.unity`、`Assets/Scenes/Sandbox/CustomObstacleSandbox.unity`、`Assets/Resources/*` | 提供运行资源和默认数据 |
+| 交互与界面层 | 场景 Canvas、运行时控制面板、任务点/起飞点/障碍物交互 | `TaskPointUIManager.cs`、`DroneSpawnPointUIManager.cs`、`RuntimeObstacleEditor.cs`、`SimulationRuntimeControlPanel.cs` | 提供用户输入入口 |
 | 仿真控制层 | 仿真状态管理、运行时入口挂接 | `SimulationManager.cs` | 串联开始、暂停、重置和主流程 |
 | 业务控制层 | 机群生成、任务分配、路径规划调用、碰撞占位、可视化挂接 | `DroneManager.cs` | 系统主控制枢纽 |
 | 单机执行层 | 单机移动控制和任务状态推进 | `DroneController.cs`、`DroneStateMachine.cs` | 将任务和路径变成飞行行为 |
@@ -32,6 +32,7 @@ flowchart TD
     B --> E["SimulationResultExporter"]
     B --> F["BatchExperimentRunner"]
     B --> G["DroneSpawnPointUIManager"]
+    B --> P["RuntimeObstacleEditor"]
     D --> H["DroneController"]
     D --> I["DroneStateMachine"]
     D --> J["DronePathVisualizer"]
@@ -43,9 +44,12 @@ flowchart TD
     C --> E
     C --> F
     C --> G
+    C --> P
     C --> M["CameraManager"]
     N["TaskPointUIManager"] --> O["TaskPointSpawner / TaskPointImporter"]
     O --> B
+    P --> D
+    P --> M
     I --> E
     M --> J
 ```
@@ -59,7 +63,7 @@ flowchart TD
 - 管理系统级状态 `Idle / Running / Paused`
 - 处理开始、暂停、重置
 - 在启动时收集任务点并触发任务分配
-- 自动补齐运行时控制面板、结果导出器、批量实验器和起飞点管理器引用
+- 自动补齐运行时控制面板、结果导出器、批量实验器、起飞点管理器和自定义障碍物编辑器引用
 
 关键特点：
 
@@ -74,6 +78,7 @@ flowchart TD
 - 保存 `DroneData`
 - 调用调度器和规划器
 - 自动配置障碍物层和建筑代理碰撞体
+- 提供运行时自定义障碍物容器与障碍刷新入口
 - 统一控制路径显示和 2D 投影
 - 提供建筑 footprint 检测
 
@@ -82,7 +87,21 @@ flowchart TD
 - 是仿真系统的核心业务控制层
 - 既连接算法，也连接场景、可视化和状态机
 
-### 4.3 DroneStateMachine + DroneController
+### 4.3 RuntimeObstacleEditor + SimulationRuntimeControlPanel
+
+职责：
+
+- 提供自定义障碍物的绘制、删除、清空和高度调整入口
+- 约束障碍物编辑只能发生在 `Idle` 状态
+- 检查新障碍物与现有建筑、任务点、起飞点的重叠
+- 在障碍布局变化后触发 `DroneManager.RefreshObstacleConfiguration`
+
+关键特点：
+
+- 当前自定义障碍物是运行时会话级对象，适合演示和实验，不等同于完整地图编辑器
+- 自定义障碍物与现有路径规划、建筑告警和起飞点/任务点系统直接复用同一套主链路
+
+### 4.4 DroneStateMachine + DroneController
 
 职责：
 
@@ -99,7 +118,7 @@ flowchart TD
 - 当前局部避让逻辑在 `DroneStateMachine` 中
 - 移动控制不依赖真实刚体推进，而是脚本驱动位置更新
 
-### 4.4 算法接入层
+### 4.5 算法接入层
 
 调度接入：
 
@@ -119,7 +138,7 @@ flowchart TD
 - 算法模块不直接操作 UI、相机或导出
 - 算法只负责输入到输出，系统层负责调用、展示和记录
 
-### 4.5 结果与实验层
+### 4.6 结果与实验层
 
 职责：
 
@@ -138,7 +157,7 @@ flowchart TD
 
 ## 5.1 单次仿真数据流
 
-1. 用户配置任务点、起飞点、算法和规划参数
+1. 用户配置任务点、起飞点、自定义障碍物、算法和规划参数
 2. `SimulationManager.OnStartClicked`
 3. `DroneManager.AutoAssignTasks` 构建 `SchedulingRequest`
 4. 调度器返回 `SchedulingResult`
@@ -165,6 +184,15 @@ flowchart TD
 3. `DroneManager` 把路径显示切换到统一投影高度
 4. `DronePathVisualizer` 基于建筑 footprint 检查当前位置和线段
 5. 若命中建筑投影，则切换告警样式并增加摘要中的建筑告警计数
+
+## 5.4 自定义障碍物编辑数据流
+
+1. 用户在运行时控制面板切换到 `绘制` 或 `删除`
+2. `RuntimeObstacleEditor` 从当前相机向地面发射射线
+3. 绘制模式下根据拖拽起点/终点生成障碍物包围盒
+4. 与现有建筑、任务点、起飞点做重叠校验
+5. 通过校验后在 `Buildings/RuntimeObstacles` 下创建建筑，并刷新 `DroneManager` 的障碍配置
+6. 路径规划、`2D俯视` footprint 检查和右侧摘要立即复用新的障碍布局
 
 ## 6. 算法模块如何与系统集成
 
@@ -230,7 +258,17 @@ flowchart TD
 -> CameraManager 重新绑定机群
 ```
 
-## 7.4 导出结果
+## 7.4 编辑自定义障碍物
+
+```text
+用户在右侧面板点击绘制
+-> RuntimeObstacleEditor 进入拖拽模式
+-> 鼠标拖拽生成候选包围盒
+-> 校验与建筑/任务点/起飞点是否重叠
+-> 创建 RuntimeObstacle 并刷新 DroneManager 障碍缓存
+```
+
+## 7.5 导出结果
 
 ```text
 用户手动导出或单轮结束自动导出
@@ -253,3 +291,4 @@ flowchart TD
 
 - 多机避让仍是业务逻辑级补偿，不是独立协同规划子系统。
 - 结果展示强项在运行时可视化和文件导出，不在回放和图表面板。
+- 当前只支持运行时会话级自定义障碍物编辑，不支持运行时多场景切换或障碍布局持久化。

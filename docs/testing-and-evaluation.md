@@ -16,6 +16,7 @@
 
 - 打开主场景
 - 检查关键对象和关键引用是否存在
+- 回归确认新增障碍物编辑器接入后未破坏主流程依赖
 
 ### 2.2 EditMode 测试
 
@@ -29,6 +30,7 @@
 - `PlanningAndExportTests`
 - `AlgorithmNameMappingTests`
 - `ExperimentPresetCatalogTests`
+- `SandboxSceneToolsTests`
 
 覆盖重点：
 
@@ -37,6 +39,19 @@
 - CSV 格式
 - 算法命名稳定性
 - 实验预设目录稳定性
+- sandbox 场景生成后的对象完整性
+
+### 2.3 自定义障碍物实验场景生成验证
+
+入口：
+
+- `KyUavSandboxSceneTools.CreateOrRefreshCustomObstacleSandboxSceneBatch`
+
+用途：
+
+- 从 `MainScene` 复制生成 `CustomObstacleSandbox.unity`
+- 清空默认建筑和任务点
+- 保留地面、起飞点和运行时主链路
 
 ## 3. 人工测试与交付记录
 
@@ -71,6 +86,9 @@
 - `2D俯视` 和建筑告警检查入口已接入
 - `kinematic rigidbody` 速度写入警告已清除
 - 默认任务集下未触发建筑穿越告警
+- 自定义障碍物实验场景可通过 batchmode 成功生成
+- 障碍物编辑功能接入后主场景烟雾验证仍为 `PASS`
+- EditMode 自动化测试当前为 `9` 项，`9` 项通过
 
 ## 7. 当前验证空白
 
@@ -80,3 +98,5 @@
 - 通过面板点击验证批量实验并核对 `session_manifest.json`、`session_summary.csv`
 - 构造显式穿越建筑 footprint 的任务集，验证建筑告警触发
 - 更复杂密集场景下的局部避让稳定性
+- 在 `CustomObstacleSandbox` 中人工验证障碍物绘制、删除、清空和高度调整
+- 自定义障碍物布局当前未持久化，保存/加载能力仍未实现

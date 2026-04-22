@@ -19,6 +19,7 @@ public class CameraManager : MonoBehaviour
     public float overviewMinHeight = 8f;
     public float overviewMaxHeight = 90f;
     public bool requireRightMouseForOverviewRotation = true;
+    public bool blockMouseSceneControlsWhenPointerOverUi = true;
 
     [Header("Follow Settings")]
     public Transform targetDrone;
@@ -393,6 +394,7 @@ public class CameraManager : MonoBehaviour
         }
 
         Transform cameraTransform = overviewCamera.transform;
+        bool blockMouseSceneInput = blockMouseSceneControlsWhenPointerOverUi && UIInputGate.IsPointerOverBlockingUi();
 
         Vector3 flatForward = cameraTransform.forward;
         flatForward.y = 0f;
@@ -430,12 +432,14 @@ public class CameraManager : MonoBehaviour
             Vector3.up * verticalInput * overviewVerticalMoveSpeed * Time.deltaTime;
 
         float scroll = Input.mouseScrollDelta.y;
-        if (Mathf.Abs(scroll) > 0.001f)
+        if (!blockMouseSceneInput && Mathf.Abs(scroll) > 0.001f)
         {
             cameraTransform.position += cameraTransform.forward * (scroll * overviewZoomSpeed * Time.deltaTime);
         }
 
-        bool allowRotation = !requireRightMouseForOverviewRotation || Input.GetMouseButton(1);
+        bool allowRotation =
+            !blockMouseSceneInput &&
+            (!requireRightMouseForOverviewRotation || Input.GetMouseButton(1));
         if (allowRotation)
         {
             overviewYaw += Input.GetAxis("Mouse X") * overviewRotationSensitivity;
@@ -457,12 +461,13 @@ public class CameraManager : MonoBehaviour
         }
 
         Transform cameraTransform = overviewCamera.transform;
+        bool blockMouseSceneInput = blockMouseSceneControlsWhenPointerOverUi && UIInputGate.IsPointerOverBlockingUi();
         float moveMultiplier = Input.GetKey(KeyCode.LeftShift) ? overviewBoostMultiplier : 1f;
         Vector3 panInput = new Vector3(Input.GetAxisRaw("Horizontal"), 0f, Input.GetAxisRaw("Vertical"));
         cameraTransform.position += panInput * (topDownPanSpeed * moveMultiplier * Time.deltaTime);
 
         float scroll = Input.mouseScrollDelta.y;
-        if (Mathf.Abs(scroll) > 0.001f)
+        if (!blockMouseSceneInput && Mathf.Abs(scroll) > 0.001f)
         {
             overviewCamera.orthographicSize = Mathf.Clamp(
                 overviewCamera.orthographicSize - scroll * topDownZoomSpeed,

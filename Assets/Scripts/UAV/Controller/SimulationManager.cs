@@ -296,12 +296,19 @@ public class SimulationManager : MonoBehaviour
             spawnPointManager = gameObject.AddComponent<DroneSpawnPointUIManager>();
         }
 
+        RuntimeObstacleEditor obstacleEditor = FindObjectOfType<RuntimeObstacleEditor>();
+        if (obstacleEditor == null)
+        {
+            obstacleEditor = gameObject.AddComponent<RuntimeObstacleEditor>();
+        }
+
         runtimeControlPanel.simulationManager = this;
         if (runtimeControlPanel.droneManager == null)
         {
             runtimeControlPanel.droneManager = droneManager;
         }
         runtimeControlPanel.spawnPointManager = spawnPointManager;
+        runtimeControlPanel.obstacleEditor = obstacleEditor;
 
         if (resultExporter == null)
         {
@@ -334,6 +341,16 @@ public class SimulationManager : MonoBehaviour
         if (spawnPointManager.droneManager == null)
         {
             spawnPointManager.droneManager = droneManager;
+        }
+
+        obstacleEditor.simulationManager = this;
+        if (obstacleEditor.droneManager == null)
+        {
+            obstacleEditor.droneManager = droneManager;
+        }
+        if (obstacleEditor.cameraManager == null)
+        {
+            obstacleEditor.cameraManager = FindObjectOfType<CameraManager>();
         }
 
         runtimeControlPanel.resultExporter = resultExporter;

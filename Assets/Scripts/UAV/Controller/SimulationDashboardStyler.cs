@@ -1,4 +1,4 @@
-using TMPro;
+﻿using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 #if UNITY_EDITOR
@@ -13,8 +13,6 @@ public class SimulationDashboardStyler : MonoBehaviour
     [Header("Theme")]
     public TMP_FontAsset preferredFont;
 
-    private const string TopScrimName = "__TopScrim";
-    private const string BottomScrimName = "__BottomScrim";
     private const string HeaderCardName = "__HeaderCard";
     private const string HeaderBodyName = "__HeaderBody";
     private const string SubtitleName = "__SubtitleText";
@@ -27,8 +25,6 @@ public class SimulationDashboardStyler : MonoBehaviour
     private bool isApplying;
     private bool applyQueued;
 
-    private static readonly Color TopScrimColor = new Color(0.02f, 0.07f, 0.12f, 0.28f);
-    private static readonly Color BottomScrimColor = new Color(0.01f, 0.04f, 0.08f, 0.42f);
     private static readonly Color CardColor = new Color(0.04f, 0.10f, 0.17f, 0.88f);
     private static readonly Color CardStroke = new Color(0.15f, 0.44f, 0.55f, 0.28f);
     private static readonly Color AccentColor = new Color(0.12f, 0.78f, 0.78f, 0.95f);
@@ -134,9 +130,9 @@ public class SimulationDashboardStyler : MonoBehaviour
 
             NormalizeCanvas(canvasRect);
             RemoveLegacySidebar(canvasRect);
-            SetupBackdrop(canvasRect);
+            RemoveBackdrop(canvasRect);
             SetupHeader(canvasRect, titleText, statusText, font);
-            SetupHintCard(canvasRect, font);
+            RemoveHintCard(canvasRect);
             SetupActionCard(
                 canvasRect,
                 controlPanel,
@@ -197,17 +193,52 @@ public class SimulationDashboardStyler : MonoBehaviour
 #endif
     }
 
-    private void SetupBackdrop(RectTransform canvasRect)
+    private void RemoveHintCard(RectTransform canvasRect)
     {
-        RectTransform top = CreateOrGetRect(TopScrimName, canvasRect);
-        top.SetSiblingIndex(0);
-        StretchTop(top, 180f);
-        StyleFlatImage(top.gameObject, TopScrimColor);
+        Transform hintCard = canvasRect.Find(HintCardName);
+        if (hintCard == null)
+        {
+            return;
+        }
 
-        RectTransform bottom = CreateOrGetRect(BottomScrimName, canvasRect);
-        bottom.SetSiblingIndex(1);
-        StretchBottom(bottom, 180f);
-        StyleFlatImage(bottom.gameObject, BottomScrimColor);
+        if (Application.isPlaying)
+        {
+            Destroy(hintCard.gameObject);
+            return;
+        }
+
+#if UNITY_EDITOR
+        DestroyImmediate(hintCard.gameObject);
+#else
+        Destroy(hintCard.gameObject);
+#endif
+    }
+
+    private void RemoveBackdrop(RectTransform canvasRect)
+    {
+        RemoveGeneratedRect(canvasRect, "__TopScrim");
+        RemoveGeneratedRect(canvasRect, "__BottomScrim");
+    }
+
+    private void RemoveGeneratedRect(RectTransform canvasRect, string nodeName)
+    {
+        Transform node = canvasRect.Find(nodeName);
+        if (node == null)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            Destroy(node.gameObject);
+            return;
+        }
+
+#if UNITY_EDITOR
+        DestroyImmediate(node.gameObject);
+#else
+        Destroy(node.gameObject);
+#endif
     }
 
     private void SetupHeader(RectTransform canvasRect, TMP_Text titleText, TMP_Text statusText, TMP_FontAsset font)
@@ -265,35 +296,6 @@ public class SimulationDashboardStyler : MonoBehaviour
         {
             statusText.text = "状态：就绪";
         }
-    }
-
-    private void SetupHintCard(RectTransform canvasRect, TMP_FontAsset font)
-    {
-        RectTransform hintCard = CreateOrGetRect(HintCardName, canvasRect);
-        AnchorToCorner(hintCard, new Vector2(-36f, -32f), new Vector2(280f, 132f), new Vector2(1f, 1f));
-        StyleCard(hintCard.gameObject, new Color(0.03f, 0.09f, 0.14f, 0.82f), new Color(0.21f, 0.49f, 0.64f, 0.22f));
-
-        TMP_Text hintTitle = CreateOrGetText("__HintTitle", hintCard, font);
-        RectTransform titleRect = hintTitle.rectTransform;
-        titleRect.anchorMin = new Vector2(0f, 1f);
-        titleRect.anchorMax = new Vector2(1f, 1f);
-        titleRect.pivot = new Vector2(0.5f, 1f);
-        titleRect.anchoredPosition = new Vector2(0f, -20f);
-        titleRect.sizeDelta = new Vector2(-40f, 24f);
-        StyleText(hintTitle, font, 16f, AccentColor, FontStyles.Bold, TextAlignmentOptions.Left);
-        hintTitle.text = "VIEW SHORTCUTS";
-        hintTitle.enableWordWrapping = false;
-
-        TMP_Text hintBody = CreateOrGetText("__HintBody", hintCard, font);
-        RectTransform bodyRect = hintBody.rectTransform;
-        bodyRect.anchorMin = new Vector2(0f, 0f);
-        bodyRect.anchorMax = new Vector2(1f, 1f);
-        bodyRect.offsetMin = new Vector2(20f, 18f);
-        bodyRect.offsetMax = new Vector2(-20f, -48f);
-        StyleText(hintBody, font, 18f, TextPrimary, FontStyles.Normal, TextAlignmentOptions.Left);
-        hintBody.text = "1  总览视角\n2  跟随视角";
-        hintBody.lineSpacing = 10f;
-        hintBody.enableWordWrapping = false;
     }
 
     private void SetupActionCard(
@@ -613,24 +615,6 @@ public class SimulationDashboardStyler : MonoBehaviour
         rect.anchoredPosition = anchoredPosition;
         rect.sizeDelta = size;
         rect.localScale = Vector3.one;
-    }
-
-    private static void StretchTop(RectTransform rect, float height)
-    {
-        rect.anchorMin = new Vector2(0f, 1f);
-        rect.anchorMax = new Vector2(1f, 1f);
-        rect.pivot = new Vector2(0.5f, 1f);
-        rect.offsetMin = new Vector2(0f, -height);
-        rect.offsetMax = Vector2.zero;
-    }
-
-    private static void StretchBottom(RectTransform rect, float height)
-    {
-        rect.anchorMin = new Vector2(0f, 0f);
-        rect.anchorMax = new Vector2(1f, 0f);
-        rect.pivot = new Vector2(0.5f, 0f);
-        rect.offsetMin = Vector2.zero;
-        rect.offsetMax = new Vector2(0f, height);
     }
 
     private static void StretchInside(RectTransform rect, Vector2 min, Vector2 max)

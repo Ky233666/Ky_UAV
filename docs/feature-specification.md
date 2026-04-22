@@ -12,32 +12,34 @@
 
 ### 功能名称
 
-主场景加载与环境就绪
+默认场景加载与环境就绪
 
 ### 功能目标
 
-在固定主场景中完成仿真运行前的基础环境准备，包括城市建筑、障碍层、相机、Canvas 和核心管理器。
+在默认主场景或自定义障碍物实验场景中完成仿真运行前的基础环境准备，包括城市建筑或空白地面、障碍层、相机、Canvas 和核心管理器。
 
 ### 主要使用流程
 
-1. 打开 `Assets/Scenes/Main/MainScene.unity`
+1. 打开 `Assets/Scenes/Main/MainScene.unity`，或打开 `Assets/Scenes/Sandbox/CustomObstacleSandbox.unity`
 2. 执行 `SimulationManager.Start`
-3. 自动挂接运行时控制面板、导出器、批量实验器和起飞点管理器
+3. 自动挂接运行时控制面板、导出器、批量实验器、起飞点管理器和自定义障碍物编辑器
 4. `DroneManager` 自动配置障碍物根节点和建筑碰撞体
 
 ### 输入
 
-- 主场景资源
+- `MainScene` 或 `CustomObstacleSandbox` 场景资源
 - `Buildings`、`Canvas`、`OverviewCamera`、`FollowCamera`
 
 ### 处理
 
 - `SimulationManager` 初始化仿真状态
 - `DroneManager` 初始化规划障碍、配置默认参数并生成无人机
+- `RuntimeObstacleEditor` 连接 `DroneManager` 与运行时控制面板
 
 ### 输出
 
 - 进入 `Idle` 状态的可运行仿真环境
+- 若为 `CustomObstacleSandbox`，则保留空的 `Buildings` 容器和原有起飞点/运行时功能链路
 
 ### 当前状态
 
@@ -54,22 +56,24 @@
 
 ### 功能名称
 
-城市场景导入与白天环境配置
+城市场景导入、环境修复与自定义障碍物实验场景生成
 
 ### 功能目标
 
-通过编辑器工具将 `SimpleCityPackage` 场景内容导入主场景，并完成环境与总览镜头修复。
+通过编辑器工具将 `SimpleCityPackage` 场景内容导入主场景，并完成环境与总览镜头修复；同时支持从主场景复制生成一个专用于自定义障碍物演示的 sandbox 场景。
 
 ### 主要使用流程
 
 1. 执行 `Tools/KY UAV/Import Simple City Into Main Scene`
 2. 执行 `Tools/KY UAV/Apply Simple City Day Environment`
 3. 执行 `Tools/KY UAV/Frame Overview Camera To City`
+4. 如需自定义障碍物实验场景，执行 `Tools/KY UAV/Create Or Refresh Custom Obstacle Sandbox Scene`
 
 ### 输入
 
 - `Assets/SimpleCityPackage/Scene/Scene 01.unity`
 - 主场景当前内容
+- `Assets/Scenes/Main/MainScene.unity`
 
 ### 处理
 
@@ -77,10 +81,14 @@
 - 提取建筑对象为 `Buildings`
 - 回写 `DroneManager.obstacleRoot`
 - 设置天空盒、雾效、平行光和总览相机构图
+- 复制 `MainScene` 生成 `CustomObstacleSandbox.unity`
+- 清空 sandbox 场景中的默认建筑和任务点，保留地面、起飞点和运行时系统链路
+- 回写 sandbox 场景的 `DroneManager.obstacleRoot` 与默认规划边界
 
 ### 输出
 
 - 可用于仿真的城市障碍环境
+- 可用于拖拽创建自定义建筑的 sandbox 场景
 
 ### 当前状态
 
@@ -90,6 +98,7 @@
 
 - `SimpleCitySceneImporter`
 - `SimpleCityEnvironmentTools`
+- `KyUavSandboxSceneTools`
 - `DroneManager`
 
 ## 3. 无人机配置与机群生成
@@ -224,7 +233,61 @@
 - `DroneSpawnPointMarker`
 - `DroneManager`
 
-## 6. 调度算法选择与调用
+## 6. 自定义障碍物编辑
+
+### 功能名称
+
+运行时自定义建筑绘制、删除与清空
+
+### 功能目标
+
+支持用户在空白地面区域拖拽创建长方体或城市楼体模板建筑，并将其作为新的静态障碍物接入路径规划、`2D俯视` 建筑 footprint 检查和实验展示流程。
+
+### 主要使用流程
+
+1. 在右侧运行时控制面板的“障碍物”区域点击 `绘制`
+2. 通过 `样式` 切换长方体或城市楼体模板
+3. 通过 `缩放` 和 `高度` 调整下一次创建建筑的尺寸
+4. 在空白地面按住左键拖拽，生成一个建筑
+5. 如需删除，点击 `删除` 后选中已有自定义建筑
+6. 如需清空，点击 `清空`
+
+### 输入
+
+- 鼠标点击/拖拽地面位置
+- 默认障碍物缩放倍率
+- 默认障碍物高度
+- 当前场景中的建筑、任务点和起飞点
+
+### 处理
+
+- `RuntimeObstacleEditor` 负责绘制、删除和清空三种模式切换
+- `RuntimeObstacleCatalog` 提供现成城市楼体模板
+- 缩放倍率统一作用于预览包围盒、重叠校验和最终障碍物生成
+- 仅允许在 `SimulationState.Idle` 下编辑障碍物
+- 创建前检查拖拽区域是否与已有建筑、自定义障碍物、任务点或起飞点重叠
+- 新建障碍物统一挂到 `Buildings/RuntimeObstacles`
+- 创建或删除后调用 `DroneManager.RefreshObstacleConfiguration`，同步规划障碍层和建筑 footprint 缓存
+- 飞行阶段额外执行前向建筑阻挡检测，必要时触发避障重规划，避免直线路径直接穿楼
+
+### 输出
+
+- 运行时会话中的 `RuntimeObstacleMarker` 障碍物集合
+- 更新后的障碍层、代理碰撞体和建筑 footprint 缓存
+
+### 当前状态
+
+`已实现`
+
+### 依赖模块
+
+- `RuntimeObstacleEditor`
+- `RuntimeObstacleCatalog`
+- `RuntimeObstacleMarker`
+- `SimulationRuntimeControlPanel`
+- `DroneManager`
+
+## 7. 调度算法选择与调用
 
 ### 功能名称
 
@@ -271,7 +334,7 @@
 - `SchedulingRequest`
 - `SchedulingResult`
 
-## 7. 路径规划算法选择与调用
+## 8. 路径规划算法选择与调用
 
 ### 功能名称
 
@@ -320,7 +383,7 @@
 - `DroneManager`
 - `DroneStateMachine`
 
-## 8. 多无人机状态管理与仿真控制
+## 9. 多无人机状态管理与仿真控制
 
 ### 功能名称
 
@@ -369,7 +432,7 @@
 - `DroneController`
 - `DroneManager`
 
-## 9. 飞行路径可视化与 2D 轨迹检查
+## 10. 飞行路径可视化与 2D 轨迹检查
 
 ### 功能名称
 
@@ -414,7 +477,7 @@
 - `DronePathVisualizer`
 - `DroneManager`
 
-## 10. 相机观察与状态展示
+## 11. 相机观察与状态展示
 
 ### 功能名称
 
@@ -458,7 +521,7 @@
 - `DroneManager`
 - `SimulationManager`
 
-## 11. 结果导出与数据记录
+## 12. 结果导出与数据记录
 
 ### 功能名称
 
@@ -503,7 +566,7 @@ CSV、JSON 和会话归档导出
 - `SimulationExperimentRecord`
 - `SimulationExperimentDetailExport`
 
-## 12. 批量实验与实验预设
+## 13. 批量实验与实验预设
 
 ### 功能名称
 
@@ -548,7 +611,7 @@ CSV、JSON 和会话归档导出
 - `BatchExperimentRunner`
 - `SimulationResultExporter`
 
-## 13. 测试、烟雾验证与打包
+## 14. 测试、烟雾验证与打包
 
 ### 功能名称
 
@@ -595,12 +658,13 @@ CSV、JSON 和会话归档导出
 - `KyUavBuildTools`
 - `KyUavEditModeBatchRunner`
 
-## 14. 当前没有实现的功能
+## 15. 当前没有实现的功能
 
 以下功能在当前仓库中没有闭环实现，文档中不应写成“已支持”：
 
 - 仿真结果回放
 - 系统内图表化对比面板
 - 多场景运行时加载与切换
+- 自定义障碍物布局持久化（保存/加载）
 - 正式的时空协同避让算法
 - 联网通信与实机控制

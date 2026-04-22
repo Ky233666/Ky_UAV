@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
-using UnityEngine.EventSystems;
 
 /// <summary>
 /// Handles runtime placement, moving, and deletion of drone spawn points.
@@ -288,7 +287,7 @@ public class DroneSpawnPointUIManager : MonoBehaviour
 
     private bool IsPointerOverUi()
     {
-        return EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
+        return UIInputGate.IsPointerOverBlockingUi();
     }
 
     private bool TryGetPlacementPosition(out Vector3 placementPosition, out bool isValidPlacement, out string failureReason)

@@ -1,6 +1,5 @@
 using TMPro;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 /// <summary>
@@ -157,7 +156,7 @@ public class TaskPointUIManager : MonoBehaviour
             return;
         }
 
-        if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+        if (UIInputGate.IsPointerOverBlockingUi())
         {
             return;
         }

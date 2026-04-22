@@ -1,0 +1,36 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 12777cb21e42eda4fad34aaa3622c92f, type: 3}
+  m_Name: RuntimeObstacleCatalog_Default
+  m_EditorClassIdentifier: 
+  entries:
+  - displayName: "\u57CE\u5E02\u957F\u697C 01"
+    prefab: {fileID: 1000013344261608, guid: e5007e888cc697d4f92f90e5ba2bbbe7, type: 3}
+    preserveAspect: 1
+  - displayName: "\u57CE\u5E02\u957F\u697C 02"
+    prefab: {fileID: 1000013635237070, guid: 9b6020b9032f63245a8866beaa483f6a, type: 3}
+    preserveAspect: 1
+  - displayName: "\u57CE\u5E02\u65B9\u697C 01"
+    prefab: {fileID: 1000013004244330, guid: 93b4bd01de44dd44bbf79780044d0571, type: 3}
+    preserveAspect: 1
+  - displayName: "\u57CE\u5E02\u65B9\u697C 02"
+    prefab: {fileID: 1000013562065788, guid: 1338cb53649162a4cbd69ec7d8fbffd5, type: 3}
+    preserveAspect: 1
+  - displayName: "\u57CE\u5E02\u9AD8\u697C 01"
+    prefab: {fileID: 1000011657098218, guid: cec6d4409ee667c4aa802dac5a5a9952, type: 3}
+    preserveAspect: 1
+  - displayName: "\u57CE\u5E02\u9AD8\u697C 02"
+    prefab: {fileID: 1000010112386766, guid: 4da20318e32211d41ada667132da136e, type: 3}
+    preserveAspect: 1
+  - displayName: "\u57CE\u5E02\u9AD8\u697C 03"
+    prefab: {fileID: 1000013190765184, guid: 45dc231bb3eb85743b22a83a465c1e91, type: 3}
+    preserveAspect: 1

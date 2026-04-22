@@ -122,14 +122,7 @@ public class DroneManager : MonoBehaviour
     void Start()
     {
         ApplyConfiguredDefaults();
-        EnsurePlanningObstacleLayerConfigured();
-
-        if (autoConfigurePlanningObstacles)
-        {
-            ConfigurePlanningObstacles();
-        }
-
-        RefreshObstacleFootprintCache();
+        RefreshObstacleConfiguration();
 
         // 自动生成无人机（如果需要）
         if (drones.Count == 0 && dronePrefab != null)
@@ -354,14 +347,7 @@ public class DroneManager : MonoBehaviour
         planningWorldMin = worldMin;
         planningWorldMax = worldMax;
 
-        EnsurePlanningObstacleLayerConfigured();
-
-        if (autoConfigurePlanningObstacles)
-        {
-            ConfigurePlanningObstacles();
-        }
-
-        RefreshObstacleFootprintCache();
+        RefreshObstacleConfiguration();
     }
 
     void LateUpdate()
@@ -454,6 +440,95 @@ public class DroneManager : MonoBehaviour
         }
 
         return maxHeight + 0.35f;
+    }
+
+    public void RefreshObstacleConfiguration()
+    {
+        EnsurePlanningObstacleLayerConfigured();
+
+        if (autoConfigurePlanningObstacles)
+        {
+            ConfigurePlanningObstacles();
+        }
+        else
+        {
+            RefreshObstacleFootprintCache();
+        }
+    }
+
+    public Transform EnsureObstacleRootExists()
+    {
+        Transform root = ResolveObstacleRoot();
+        if (root != null)
+        {
+            return root;
+        }
+
+        GameObject obstacleRootObject = new GameObject("Buildings");
+        obstacleRoot = obstacleRootObject.transform;
+        Debug.Log("[DroneManager] 已自动创建障碍物根节点 Buildings");
+        return obstacleRoot;
+    }
+
+    public Transform EnsureRuntimeObstacleContainer()
+    {
+        Transform root = EnsureObstacleRootExists();
+        Transform runtimeObstacleContainer = root.Find("RuntimeObstacles");
+        if (runtimeObstacleContainer != null)
+        {
+            return runtimeObstacleContainer;
+        }
+
+        GameObject containerObject = new GameObject("RuntimeObstacles");
+        runtimeObstacleContainer = containerObject.transform;
+        runtimeObstacleContainer.SetParent(root, false);
+
+        int buildingLayer = LayerMask.NameToLayer("Building");
+        if (buildingLayer >= 0)
+        {
+            containerObject.layer = buildingLayer;
+        }
+
+        return runtimeObstacleContainer;
+    }
+
+    public bool IsMovementSegmentBlockedByObstacle(
+        Vector3 from,
+        Vector3 to,
+        float horizontalPadding,
+        float verticalPadding,
+        out RaycastHit hitInfo)
+    {
+        hitInfo = default;
+        EnsurePlanningObstacleLayerConfigured();
+
+        if (planningObstacleLayer.value == 0)
+        {
+            return false;
+        }
+
+        Vector3 direction = to - from;
+        float distance = direction.magnitude;
+        if (distance <= 0.01f)
+        {
+            return false;
+        }
+
+        Vector3 normalizedDirection = direction / distance;
+        Vector3 halfExtents = new Vector3(
+            Mathf.Max(0.15f, horizontalPadding),
+            Mathf.Max(0.15f, verticalPadding),
+            Mathf.Max(0.15f, horizontalPadding));
+
+        return Physics.BoxCast(
+            from,
+            halfExtents,
+            normalizedDirection,
+            out hitInfo,
+            Quaternion.identity,
+            distance,
+            planningObstacleLayer,
+            QueryTriggerInteraction.Ignore);
     }
 
     public int GetBuildingWarningCount()
@@ -623,7 +698,12 @@ public class DroneManager : MonoBehaviour
     /// </summary>
     public IPathPlanner CreatePathPlanner()
     {
-        switch (pathPlannerType)
+        return CreatePathPlanner(pathPlannerType);
+    }
+
+    public IPathPlanner CreatePathPlanner(PathPlannerType plannerType)
+    {
+        switch (plannerType)
         {
             case PathPlannerType.RRT:
                 return new RRTPlanner();
@@ -642,10 +722,24 @@ public class DroneManager : MonoBehaviour
     /// </summary>
     public PathPlanningResult PlanPathForTask(int droneId, TaskPoint taskPoint)
     {
+        return PlanPathForTask(droneId, taskPoint, pathPlannerType);
+    }
+
+    public PathPlanningResult PlanPathForTaskPreferObstacleAware(int droneId, TaskPoint taskPoint)
+    {
+        PathPlannerType preferredPlanner =
+            pathPlannerType == PathPlannerType.StraightLine
+                ? PathPlannerType.AStar
+                : pathPlannerType;
+        return PlanPathForTask(droneId, taskPoint, preferredPlanner);
+    }
+
+    public PathPlanningResult PlanPathForTask(int droneId, TaskPoint taskPoint, PathPlannerType plannerType)
+    {
         PathPlanningResult failedResult = new PathPlanningResult
         {
             success = false,
-            plannerName = pathPlannerType.ToString(),
+            plannerName = plannerType.ToString(),
             message = "路径规划未执行"
         };
 
@@ -663,7 +757,7 @@ public class DroneManager : MonoBehaviour
             return failedResult;
         }
 
-        IPathPlanner planner = CreatePathPlanner();
+        IPathPlanner planner = CreatePathPlanner(plannerType);
         Vector3 startPosition = drone.transform.position;
         startPosition.y = cruiseHeight;
         Vector3 targetPosition = taskPoint.transform.position;
