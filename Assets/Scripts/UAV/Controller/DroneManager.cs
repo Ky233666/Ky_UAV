@@ -13,6 +13,7 @@ public class DroneManager : MonoBehaviour
     private float pathProjectionHeight = 12f;
     private readonly List<Bounds> obstacleFootprintBounds = new List<Bounds>();
     private bool obstacleFootprintCacheInitialized;
+    private AlgorithmVisualizerManager algorithmVisualizerManager;
 
     [Header("无人机 Prefab")]
     [Tooltip("无人机 Prefab")]
@@ -774,7 +775,22 @@ public class DroneManager : MonoBehaviour
             allowDiagonal = allowDiagonalPlanning
         };
 
-        PathPlanningResult result = planner.PlanPath(request);
+        AlgorithmVisualizerManager visualizer = ResolveAlgorithmVisualizerManager();
+        PathPlanningVisualizationRecorder recorder = visualizer != null
+            ? visualizer.CreateRecorder(plannerType, droneId, data.droneName, request)
+            : null;
+
+        PathPlanningResult result = planner is IPathPlannerWithVisualization visualizationPlanner && recorder != null
+            ? visualizationPlanner.PlanPath(request, recorder)
+            : planner.PlanPath(request);
+
+        if (recorder != null && visualizer != null)
+        {
+            PathPlanningVisualizationBuilder.RecordFallbackTrace(recorder, request, result);
+            recorder.FinalizeResult(result);
+            visualizer.RegisterPlanningTrace(recorder.BuildTrace());
+        }
+
         data.currentPlannerName = result.plannerName;
         data.plannedPath = result.waypoints ?? new List<Vector3>();
         data.currentWaypointIndex = 0;
@@ -789,6 +805,16 @@ public class DroneManager : MonoBehaviour
         }
 
         return result;
+    }
+
+    private AlgorithmVisualizerManager ResolveAlgorithmVisualizerManager()
+    {
+        if (algorithmVisualizerManager == null)
+        {
+            algorithmVisualizerManager = FindObjectOfType<AlgorithmVisualizerManager>();
+        }
+
+        return algorithmVisualizerManager;
     }
 
     /// <summary>

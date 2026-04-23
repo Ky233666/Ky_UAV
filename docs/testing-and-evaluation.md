@@ -16,7 +16,7 @@
 
 - 打开主场景
 - 检查关键对象和关键引用是否存在
-- 回归确认新增障碍物编辑器接入后未破坏主流程依赖
+- 回归确认新增障碍物编辑器和路径规划过程可视化接入后未破坏主流程依赖
 
 ### 2.2 EditMode 测试
 
@@ -31,11 +31,13 @@
 - `AlgorithmNameMappingTests`
 - `ExperimentPresetCatalogTests`
 - `SandboxSceneToolsTests`
+- `PathPlanningVisualizationTests`
 
 覆盖重点：
 
 - 调度容量约束
 - 规划基础约束
+- 路径规划过程轨迹记录与播放状态更新
 - CSV 格式
 - 算法命名稳定性
 - 实验预设目录稳定性
@@ -88,7 +90,8 @@
 - 默认任务集下未触发建筑穿越告警
 - 自定义障碍物实验场景可通过 batchmode 成功生成
 - 障碍物编辑功能接入后主场景烟雾验证仍为 `PASS`
-- EditMode 自动化测试当前为 `9` 项，`9` 项通过
+- 截至 `2026-04-21`，历史 EditMode 自动化测试为 `9` 项，`9` 项通过
+- `2026-04-22` 新增 `PathPlanningVisualizationTests` 共 `3` 项，用于覆盖 A* / RRT 过程记录和播放状态更新；当前已完成程序集构建验证，待用 Unity Test Runner 补正式执行记录
 
 ## 7. 当前验证空白
 
@@ -98,5 +101,8 @@
 - 通过面板点击验证批量实验并核对 `session_manifest.json`、`session_summary.csv`
 - 构造显式穿越建筑 footprint 的任务集，验证建筑告警触发
 - 更复杂密集场景下的局部避让稳定性
-- 在 `CustomObstacleSandbox` 中人工验证障碍物绘制、删除、清空和高度调整
+- 在 `CustomObstacleSandbox` 中人工验证障碍物绘制、删除、清空、样式切换、缩放和高度调整
+- 人工验证鼠标悬停在运行时面板、Scroll View、输入框和下拉控件上时，场景滚轮不会再穿透到相机缩放
+- 人工验证“算法过程演示”区在不同分辨率下的布局、无人机切换、速度切换和图例显示
+- 人工验证 `F9 / F11 / F12` 与面板按钮在播放状态同步上保持一致
 - 自定义障碍物布局当前未持久化，保存/加载能力仍未实现

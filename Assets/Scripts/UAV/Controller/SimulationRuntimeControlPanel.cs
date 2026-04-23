@@ -18,6 +18,7 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     public BatchExperimentRunner batchExperimentRunner;
     public DroneSpawnPointUIManager spawnPointManager;
     public RuntimeObstacleEditor obstacleEditor;
+    public AlgorithmVisualizerManager algorithmVisualizerManager;
 
     [Header("Panel Layout")]
     public Vector2 expandedSize = new Vector2(384f, 460f);
@@ -105,12 +106,22 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     private TMP_Text statsText;
     private TMP_Text footerText;
     private TMP_Text expandButtonText;
+    private TMP_Text visualizationSelectedDroneValueText;
+    private TMP_Text visualizationModeValueText;
+    private TMP_Text visualizationSpeedValueText;
+    private TMP_Text visualizationStatusText;
+    private TMP_Text visualizationDescriptionText;
+    private TMP_Text visualizationLegendText;
     private TMP_InputField exportDirectoryInputField;
     private LayoutElement statsCardLayoutElement;
     private Button plannedPathToggleButton;
     private Button trailToggleButton;
     private Button diagonalPlanningToggleButton;
     private Button obstacleAutoConfigToggleButton;
+    private Button visualizationPlayButton;
+    private Button visualizationPauseButton;
+    private Button visualizationStepButton;
+    private Button visualizationResetButton;
     private bool isExpanded;
     private float nextSummaryRefreshTime;
     private Vector2 lastCanvasSize;
@@ -241,6 +252,18 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         if (obstacleEditor == null)
         {
             obstacleEditor = FindObjectOfType<RuntimeObstacleEditor>();
+        }
+
+        if (algorithmVisualizerManager == null)
+        {
+            algorithmVisualizerManager = simulationManager != null
+                ? simulationManager.algorithmVisualizerManager
+                : null;
+
+            if (algorithmVisualizerManager == null)
+            {
+                algorithmVisualizerManager = FindObjectOfType<AlgorithmVisualizerManager>();
+            }
         }
 
         if (runtimeFont == null)
@@ -579,6 +602,21 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         CreateToggleRow(algorithmSection, "对角搜索", out diagonalPlanningToggleButton, ToggleDiagonalPlanning);
         CreateToggleRow(algorithmSection, "障碍自动", out obstacleAutoConfigToggleButton, ToggleObstacleAutoConfiguration);
 
+        RectTransform visualizationSection = CreateSectionCard(content, "算法过程演示", "播放路径规划搜索过程，观察不同算法的扩展顺序、候选路径和回溯方式。");
+        CreateStepperRow(visualizationSection, "无人机", out visualizationSelectedDroneValueText, OnPreviousVisualizationDroneClicked, OnNextVisualizationDroneClicked, 168f);
+        CreateStepperRow(visualizationSection, "模式", out visualizationModeValueText, OnPreviousVisualizationModeClicked, OnNextVisualizationModeClicked, 168f);
+        CreateStepperRow(visualizationSection, "速度", out visualizationSpeedValueText, OnDecreaseVisualizationSpeedClicked, OnIncreaseVisualizationSpeedClicked, 108f);
+        CreateButtonStripRow(visualizationSection, "播放控制", new[]
+        {
+            new ButtonAction("播放/继续", PrimaryButtonColor, PlayVisualization, 82f),
+            new ButtonAction("暂停", SecondaryButtonColor, PauseVisualization, 56f),
+            new ButtonAction("单步", new Color(0.10f, 0.48f, 0.62f, 0.98f), StepVisualization, 56f),
+            new ButtonAction("重置", new Color(0.24f, 0.34f, 0.42f, 0.98f), ResetVisualizationPlayback, 56f)
+        }, out visualizationPlayButton, out visualizationPauseButton, out visualizationStepButton, out visualizationResetButton);
+        CreateInfoCard(visualizationSection, "VisualizationStatus", out visualizationStatusText, out _, 110f);
+        CreateInfoCard(visualizationSection, "VisualizationDescription", out visualizationDescriptionText, out _, 92f);
+        CreateInfoCard(visualizationSection, "VisualizationLegend", out visualizationLegendText, out _, 168f);
+
         RectTransform fleetSection = CreateSectionCard(content, "机群", "数量、速度和运行倍率。");
         CreateStepperRow(fleetSection, "数量", out droneCountValueText, OnDecreaseDroneCountClicked, OnIncreaseDroneCountClicked);
         CreateStepperRow(fleetSection, "速度", out droneSpeedValueText, OnDecreaseDroneSpeedClicked, OnIncreaseDroneSpeedClicked);
@@ -794,9 +832,10 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
 
         if (footerText != null)
         {
-            footerText.text = $"{transientMessage}  |  F5开始/继续 F6暂停 F7重置 F8重建 F10退出 Ctrl+Shift+C/J/B/X 导出/批量";
+            footerText.text = $"{transientMessage}  |  F5开始/继续 F6暂停 F7重置 F8重建 F9演示播放 F10退出 F11演示单步 F12演示重置 Ctrl+Shift+C/J/B/X 导出/批量";
         }
 
+        RefreshVisualizationPanel();
         RefreshExportDirectoryUi(false);
         RefreshBatchStatus();
     }
@@ -846,6 +885,84 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
             $"镜头 {cameraMode}  目标 {cameraTarget}  等待 {waitingDroneCount}  冲突 {totalConflictCount}  建筑告警 {buildingWarningCount}  机群 {droneCount}  起点 {spawnPointCount}  自定义障碍 {customObstacleCount}";
 
         RefreshStats(taskPoints, cameraTarget);
+    }
+
+    private void RefreshVisualizationPanel()
+    {
+        string selectedDroneLabel = algorithmVisualizerManager != null
+            ? algorithmVisualizerManager.GetSelectedDroneLabel()
+            : "等待规划";
+        string modeLabel = algorithmVisualizerManager != null
+            ? algorithmVisualizerManager.GetModeDisplayName()
+            : "完整过程";
+        string speedLabel = algorithmVisualizerManager != null
+            ? algorithmVisualizerManager.GetPlaybackSpeedLabel()
+            : "1x";
+
+        if (visualizationSelectedDroneValueText != null)
+        {
+            visualizationSelectedDroneValueText.text = selectedDroneLabel;
+        }
+
+        if (visualizationModeValueText != null)
+        {
+            visualizationModeValueText.text = modeLabel;
+        }
+
+        if (visualizationSpeedValueText != null)
+        {
+            visualizationSpeedValueText.text = speedLabel;
+        }
+
+        if (visualizationStatusText != null)
+        {
+            visualizationStatusText.text = algorithmVisualizerManager != null
+                ? $"无人机: {selectedDroneLabel}\n算法: {algorithmVisualizerManager.GetCurrentAlgorithmLabel()}\n步骤: {algorithmVisualizerManager.GetCurrentStepLabel()}\n状态: {algorithmVisualizerManager.GetPlaybackStateLabel()}"
+                : "无人机: 等待规划\n算法: 未连接\n步骤: 0 / 0\n状态: 暂无轨迹";
+        }
+
+        if (visualizationDescriptionText != null)
+        {
+            visualizationDescriptionText.text = algorithmVisualizerManager != null
+                ? algorithmVisualizerManager.GetCurrentDescription()
+                : "当前场景还没有可播放的路径规划过程。开始仿真后，这里会显示节点扩展、候选路径变化和最终回溯说明。";
+        }
+
+        if (visualizationLegendText != null)
+        {
+            visualizationLegendText.text = algorithmVisualizerManager != null
+                ? algorithmVisualizerManager.GetLegendText()
+                : "图例将在连接算法可视化管理器后显示。";
+        }
+
+        UpdateVisualizationButtons();
+    }
+
+    private void UpdateVisualizationButtons()
+    {
+        bool hasTrace = algorithmVisualizerManager != null && algorithmVisualizerManager.HasPlayableTrace();
+        bool isPlaying = algorithmVisualizerManager != null &&
+                         algorithmVisualizerManager.PlaybackState == PathPlanningVisualizationPlaybackState.Playing;
+
+        if (visualizationPlayButton != null)
+        {
+            visualizationPlayButton.interactable = hasTrace;
+        }
+
+        if (visualizationPauseButton != null)
+        {
+            visualizationPauseButton.interactable = hasTrace && isPlaying;
+        }
+
+        if (visualizationStepButton != null)
+        {
+            visualizationStepButton.interactable = hasTrace;
+        }
+
+        if (visualizationResetButton != null)
+        {
+            visualizationResetButton.interactable = hasTrace;
+        }
     }
 
     private void ToggleExpanded()
@@ -923,12 +1040,45 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
             return;
         }
 
+        if (algorithmVisualizerManager != null && Input.GetKeyDown(KeyCode.F9))
+        {
+            if (algorithmVisualizerManager.PlaybackState == PathPlanningVisualizationPlaybackState.Playing)
+            {
+                algorithmVisualizerManager.Pause();
+                transientMessage = "已通过快捷键暂停算法过程演示";
+            }
+            else
+            {
+                algorithmVisualizerManager.Resume();
+                transientMessage = "已通过快捷键播放算法过程演示";
+            }
+
+            RefreshAllLabels();
+            return;
+        }
+
         if (simulationManager != null && Input.GetKeyDown(KeyCode.F6))
         {
             simulationManager.OnPauseClicked();
             transientMessage = "已通过快捷键触发暂停";
             RefreshAllLabels();
             RefreshSummary();
+            return;
+        }
+
+        if (algorithmVisualizerManager != null && Input.GetKeyDown(KeyCode.F11))
+        {
+            algorithmVisualizerManager.StepForward();
+            transientMessage = "已通过快捷键单步推进算法过程";
+            RefreshAllLabels();
+            return;
+        }
+
+        if (algorithmVisualizerManager != null && Input.GetKeyDown(KeyCode.F12))
+        {
+            algorithmVisualizerManager.ResetPlayback();
+            transientMessage = "已通过快捷键重置算法过程演示";
+            RefreshAllLabels();
             return;
         }
 
@@ -1142,6 +1292,146 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
     {
         configuredAutoConfigureObstacles = !configuredAutoConfigureObstacles;
         ApplyPlanningSettings();
+    }
+
+    private void OnPreviousVisualizationDroneClicked()
+    {
+        if (algorithmVisualizerManager == null)
+        {
+            transientMessage = "未找到算法可视化管理器";
+            RefreshAllLabels();
+            return;
+        }
+
+        algorithmVisualizerManager.SelectPreviousDrone();
+        transientMessage = $"切换到 {algorithmVisualizerManager.GetSelectedDroneLabel()} 的规划轨迹";
+        RefreshAllLabels();
+    }
+
+    private void OnNextVisualizationDroneClicked()
+    {
+        if (algorithmVisualizerManager == null)
+        {
+            transientMessage = "未找到算法可视化管理器";
+            RefreshAllLabels();
+            return;
+        }
+
+        algorithmVisualizerManager.SelectNextDrone();
+        transientMessage = $"切换到 {algorithmVisualizerManager.GetSelectedDroneLabel()} 的规划轨迹";
+        RefreshAllLabels();
+    }
+
+    private void OnPreviousVisualizationModeClicked()
+    {
+        if (algorithmVisualizerManager == null)
+        {
+            transientMessage = "未找到算法可视化管理器";
+            RefreshAllLabels();
+            return;
+        }
+
+        algorithmVisualizerManager.SelectPreviousMode();
+        transientMessage = $"演示模式切换为 {algorithmVisualizerManager.GetModeDisplayName()}";
+        RefreshAllLabels();
+    }
+
+    private void OnNextVisualizationModeClicked()
+    {
+        if (algorithmVisualizerManager == null)
+        {
+            transientMessage = "未找到算法可视化管理器";
+            RefreshAllLabels();
+            return;
+        }
+
+        algorithmVisualizerManager.SelectNextMode();
+        transientMessage = $"演示模式切换为 {algorithmVisualizerManager.GetModeDisplayName()}";
+        RefreshAllLabels();
+    }
+
+    private void OnDecreaseVisualizationSpeedClicked()
+    {
+        if (algorithmVisualizerManager == null)
+        {
+            transientMessage = "未找到算法可视化管理器";
+            RefreshAllLabels();
+            return;
+        }
+
+        algorithmVisualizerManager.SelectPreviousSpeed();
+        transientMessage = $"演示速度调整为 {algorithmVisualizerManager.GetPlaybackSpeedLabel()}";
+        RefreshAllLabels();
+    }
+
+    private void OnIncreaseVisualizationSpeedClicked()
+    {
+        if (algorithmVisualizerManager == null)
+        {
+            transientMessage = "未找到算法可视化管理器";
+            RefreshAllLabels();
+            return;
+        }
+
+        algorithmVisualizerManager.SelectNextSpeed();
+        transientMessage = $"演示速度调整为 {algorithmVisualizerManager.GetPlaybackSpeedLabel()}";
+        RefreshAllLabels();
+    }
+
+    private void PlayVisualization()
+    {
+        if (algorithmVisualizerManager == null)
+        {
+            transientMessage = "未找到算法可视化管理器";
+            RefreshAllLabels();
+            return;
+        }
+
+        algorithmVisualizerManager.Resume();
+        transientMessage = "已开始/继续播放算法过程";
+        RefreshAllLabels();
+    }
+
+    private void PauseVisualization()
+    {
+        if (algorithmVisualizerManager == null)
+        {
+            transientMessage = "未找到算法可视化管理器";
+            RefreshAllLabels();
+            return;
+        }
+
+        algorithmVisualizerManager.Pause();
+        transientMessage = "已暂停算法过程播放";
+        RefreshAllLabels();
+    }
+
+    private void StepVisualization()
+    {
+        if (algorithmVisualizerManager == null)
+        {
+            transientMessage = "未找到算法可视化管理器";
+            RefreshAllLabels();
+            return;
+        }
+
+        algorithmVisualizerManager.StepForward();
+        transientMessage = "已单步推进算法过程";
+        RefreshAllLabels();
+    }
+
+    private void ResetVisualizationPlayback()
+    {
+        if (algorithmVisualizerManager == null)
+        {
+            transientMessage = "未找到算法可视化管理器";
+            RefreshAllLabels();
+            return;
+        }
+
+        algorithmVisualizerManager.ResetPlayback();
+        transientMessage = "已重置算法过程演示";
+        RefreshAllLabels();
     }
 
     private void OnDecreaseDroneCountClicked()
@@ -2316,6 +2606,18 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
 
     private void CreateButtonStripRow(RectTransform parent, string label, ButtonAction[] actions)
     {
+        CreateButtonStripRow(parent, label, actions, out _, out _, out _, out _);
+    }
+
+    private void CreateButtonStripRow(
+        RectTransform parent,
+        string label,
+        ButtonAction[] actions,
+        out Button firstButton,
+        out Button secondButton,
+        out Button thirdButton,
+        out Button fourthButton)
+    {
         GameObject rowObject = new GameObject("ActionRow_" + label, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
         RectTransform row = rowObject.GetComponent<RectTransform>();
         row.SetParent(parent, false);
@@ -2355,9 +2657,28 @@ public class SimulationRuntimeControlPanel : MonoBehaviour
         LayoutElement buttonRowLayout = buttonRow.gameObject.AddComponent<LayoutElement>();
         buttonRowLayout.preferredHeight = 34f;
 
+        firstButton = null;
+        secondButton = null;
+        thirdButton = null;
+        fourthButton = null;
         for (int i = 0; i < actions.Length; i++)
         {
-            CreateActionButton(buttonRow, actions[i].label, actions[i].color, actions[i].callback, actions[i].width, flexibleWidth: true);
+            Button button = CreateActionButton(buttonRow, actions[i].label, actions[i].color, actions[i].callback, actions[i].width, flexibleWidth: true);
+            switch (i)
+            {
+                case 0:
+                    firstButton = button;
+                    break;
+                case 1:
+                    secondButton = button;
+                    break;
+                case 2:
+                    thirdButton = button;
+                    break;
+                case 3:
+                    fourthButton = button;
+                    break;
+            }
         }
     }
 

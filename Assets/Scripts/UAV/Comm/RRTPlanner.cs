@@ -4,10 +4,9 @@ using UnityEngine;
 
 /// <summary>
 /// 基于二维采样树的 RRT 路径规划器。
-/// 当前在 XZ 平面上扩展采样树，使用 worldMin/worldMax 和 obstacleLayer 做边界与障碍检测。
-/// 为了实验结果可复现，采样随机数种子由请求参数稳定生成。
+/// 当前在 XZ 平面扩展随机树，并通过碰撞检测规避障碍区域。
 /// </summary>
-public class RRTPlanner : IPathPlanner
+public class RRTPlanner : IPathPlannerWithVisualization
 {
     private const float GoalSampleProbability = 0.20f;
     private const float NodeCollisionPadding = 0.30f;
@@ -18,6 +17,13 @@ public class RRTPlanner : IPathPlanner
     public bool SupportsDynamicReplan => true;
 
     public PathPlanningResult PlanPath(PathPlanningRequest request)
+    {
+        return PlanPath(request, null);
+    }
+
+    public PathPlanningResult PlanPath(
+        PathPlanningRequest request,
+        PathPlanningVisualizationRecorder recorder)
     {
         PathPlanningResult result = new PathPlanningResult
         {
@@ -32,9 +38,15 @@ public class RRTPlanner : IPathPlanner
             return result;
         }
 
+        PathPlanningVisualizationBuilder.RecordInitialization(
+            recorder,
+            request,
+            "RRT 初始化完成，随机树已从起点建立，等待采样扩展。");
+
         if (request.worldMax.x <= request.worldMin.x || request.worldMax.z <= request.worldMin.z)
         {
             result.message = "规划边界无效";
+            PathPlanningVisualizationBuilder.RecordSearchFinished(recorder, false, result.message);
             return result;
         }
 
@@ -42,12 +54,14 @@ public class RRTPlanner : IPathPlanner
             !IsInsideBounds(request.targetPosition, request.worldMin, request.worldMax))
         {
             result.message = "起点或终点超出规划边界";
+            PathPlanningVisualizationBuilder.RecordSearchFinished(recorder, false, result.message);
             return result;
         }
 
         if (IsPointBlocked(request.startPosition, request) || IsPointBlocked(request.targetPosition, request))
         {
             result.message = "起点或终点位于障碍区域";
+            PathPlanningVisualizationBuilder.RecordSearchFinished(recorder, false, result.message);
             return result;
         }
 
@@ -58,6 +72,8 @@ public class RRTPlanner : IPathPlanner
             result.totalCost = Vector3.Distance(request.startPosition, request.targetPosition);
             result.success = true;
             result.message = "已生成直达 RRT 路径";
+            RecordDirectPath(recorder, result.waypoints);
+            PathPlanningVisualizationBuilder.RecordSearchFinished(recorder, true, result.message);
             return result;
         }
 
@@ -73,7 +89,8 @@ public class RRTPlanner : IPathPlanner
 
         for (int iteration = 0; iteration < maxIterations; iteration++)
         {
-            Vector3 sample = random.NextDouble() < GoalSampleProbability
+            bool sampledGoal = random.NextDouble() < GoalSampleProbability;
+            Vector3 sample = sampledGoal
                 ? request.targetPosition
                 : SamplePoint(random, request.worldMin, request.worldMax, request.startPosition.y);
 
@@ -83,32 +100,272 @@ public class RRTPlanner : IPathPlanner
 
             if (!IsInsideBounds(newPoint, request.worldMin, request.worldMax))
             {
+                RecordRejectedExpansion(
+                    recorder,
+                    iteration + 1,
+                    nearest,
+                    newPoint,
+                    "采样点超出规划边界，本次扩展被丢弃。");
                 continue;
             }
 
-            if (IsPointBlocked(newPoint, request) || IsSegmentBlocked(nearest, newPoint, request))
+            if (IsPointBlocked(newPoint, request))
             {
+                RecordBlockedExpansion(
+                    recorder,
+                    iteration + 1,
+                    nearest,
+                    newPoint,
+                    "新采样节点落入障碍区域，本次树扩展失败。");
+                continue;
+            }
+
+            if (IsSegmentBlocked(nearest, newPoint, request))
+            {
+                RecordBlockedExpansion(
+                    recorder,
+                    iteration + 1,
+                    nearest,
+                    newPoint,
+                    "采样连线穿过障碍物，本次树扩展被拒绝。");
                 continue;
             }
 
             tree.Add(new RRTNode(newPoint, nearestIndex));
             int newIndex = tree.Count - 1;
+            RecordAcceptedExpansion(
+                recorder,
+                tree,
+                nearestIndex,
+                newIndex,
+                iteration + 1,
+                sampledGoal,
+                request);
 
             if (Vector3.Distance(newPoint, request.targetPosition) <= connectDistance &&
                 !IsSegmentBlocked(newPoint, request.targetPosition, request))
             {
                 tree.Add(new RRTNode(request.targetPosition, newIndex));
-                List<Vector3> waypoints = BuildWaypoints(tree, tree.Count - 1, request);
-                result.waypoints = SimplifyWaypoints(waypoints, request);
+                List<Vector3> rawWaypoints = BuildWaypoints(tree, tree.Count - 1, request);
+                result.waypoints = SimplifyWaypoints(new List<Vector3>(rawWaypoints), request);
                 result.totalCost = CalculatePathCost(result.waypoints);
                 result.success = true;
                 result.message = $"RRT 规划成功，迭代次数：{iteration + 1}，路径点数量：{result.waypoints.Count}";
+                RecordGoalConnection(recorder, tree, tree.Count - 1, rawWaypoints, result.waypoints, iteration + 1, request);
+                PathPlanningVisualizationBuilder.RecordSearchFinished(recorder, true, result.message);
                 return result;
             }
         }
 
         result.message = $"RRT 未在 {maxIterations} 次迭代内找到可达路径";
+        PathPlanningVisualizationBuilder.RecordSearchFinished(recorder, false, result.message);
         return result;
+    }
+
+    private static void RecordDirectPath(
+        PathPlanningVisualizationRecorder recorder,
+        List<Vector3> path)
+    {
+        if (recorder == null)
+        {
+            return;
+        }
+
+        PathPlanningVisualizationStep candidateStep = PathPlanningVisualizationBuilder.CreateStep(
+            PathPlanningVisualizationStepType.CandidatePathUpdated,
+            "RRT 检测到起点与终点之间无遮挡，直接采用直达候选路径。");
+        candidateStep.replaceCandidatePath = true;
+        candidateStep.candidatePath = new List<Vector3>(path);
+        recorder.RecordStep(candidateStep);
+
+        PathPlanningVisualizationStep finalStep = PathPlanningVisualizationBuilder.CreateStep(
+            PathPlanningVisualizationStepType.FinalPathConfirmed,
+            "已确认直达路径，无需继续扩展随机树。");
+        finalStep.replaceFinalPath = true;
+        finalStep.finalPath = new List<Vector3>(path);
+        recorder.RecordStep(finalStep);
+    }
+
+    private static void RecordRejectedExpansion(
+        PathPlanningVisualizationRecorder recorder,
+        int iteration,
+        Vector3 nearest,
+        Vector3 rejectedPoint,
+        string description)
+    {
+        if (recorder == null)
+        {
+            return;
+        }
+
+        PathPlanningVisualizationStep step = PathPlanningVisualizationBuilder.CreateStep(
+            PathPlanningVisualizationStepType.NodeRejected,
+            $"RRT 迭代 {iteration}：{description}");
+        step.nodeUpdates.Add(PathPlanningVisualizationBuilder.CreateNode(
+            nearest,
+            PathPlanningVisualizationNodeRole.Current,
+            iteration,
+            label: $"#{iteration}"));
+        step.nodeUpdates.Add(PathPlanningVisualizationBuilder.CreateNode(
+            rejectedPoint,
+            PathPlanningVisualizationNodeRole.Rejected,
+            iteration));
+        step.edgeUpdates.Add(PathPlanningVisualizationBuilder.CreateEdge(
+            nearest,
+            rejectedPoint,
+            PathPlanningVisualizationEdgeRole.Rejected,
+            iteration));
+        recorder.RecordStep(step);
+    }
+
+    private static void RecordBlockedExpansion(
+        PathPlanningVisualizationRecorder recorder,
+        int iteration,
+        Vector3 nearest,
+        Vector3 blockedPoint,
+        string description)
+    {
+        if (recorder == null)
+        {
+            return;
+        }
+
+        PathPlanningVisualizationStep step = PathPlanningVisualizationBuilder.CreateStep(
+            PathPlanningVisualizationStepType.NodeRejected,
+            $"RRT 迭代 {iteration}：{description}");
+        step.nodeUpdates.Add(PathPlanningVisualizationBuilder.CreateNode(
+            nearest,
+            PathPlanningVisualizationNodeRole.Current,
+            iteration,
+            label: $"#{iteration}"));
+        step.nodeUpdates.Add(PathPlanningVisualizationBuilder.CreateNode(
+            blockedPoint,
+            PathPlanningVisualizationNodeRole.Blocked,
+            iteration));
+        step.edgeUpdates.Add(PathPlanningVisualizationBuilder.CreateEdge(
+            nearest,
+            blockedPoint,
+            PathPlanningVisualizationEdgeRole.Rejected,
+            iteration));
+        recorder.RecordStep(step);
+    }
+
+    private static void RecordAcceptedExpansion(
+        PathPlanningVisualizationRecorder recorder,
+        List<RRTNode> tree,
+        int nearestIndex,
+        int newIndex,
+        int iteration,
+        bool sampledGoal,
+        PathPlanningRequest request)
+    {
+        if (recorder == null || tree == null || nearestIndex < 0 || newIndex < 0)
+        {
+            return;
+        }
+
+        Vector3 nearest = tree[nearestIndex].position;
+        Vector3 newPoint = tree[newIndex].position;
+        PathPlanningVisualizationStep step = PathPlanningVisualizationBuilder.CreateStep(
+            PathPlanningVisualizationStepType.NodeVisited,
+            sampledGoal
+                ? $"RRT 迭代 {iteration}：目标偏置采样成功，随机树向终点方向延伸。"
+                : $"RRT 迭代 {iteration}：接受新采样节点，随机树继续向可行空间扩展。");
+        step.nodeUpdates.Add(PathPlanningVisualizationBuilder.CreateNode(
+            nearest,
+            PathPlanningVisualizationNodeRole.Current,
+            iteration,
+            label: $"#{iteration}"));
+        step.nodeUpdates.Add(PathPlanningVisualizationBuilder.CreateNode(
+            newPoint,
+            PathPlanningVisualizationNodeRole.Visited,
+            iteration));
+        step.edgeUpdates.Add(PathPlanningVisualizationBuilder.CreateEdge(
+            nearest,
+            newPoint,
+            PathPlanningVisualizationEdgeRole.Tree,
+            iteration,
+            Vector3.Distance(nearest, newPoint)));
+        step.replaceCandidatePath = true;
+        step.candidatePath = BuildBranchPath(tree, newIndex, request);
+        recorder.RecordStep(step);
+    }
+
+    private static void RecordGoalConnection(
+        PathPlanningVisualizationRecorder recorder,
+        List<RRTNode> tree,
+        int goalIndex,
+        List<Vector3> rawWaypoints,
+        List<Vector3> finalPath,
+        int iteration,
+        PathPlanningRequest request)
+    {
+        if (recorder == null || tree == null || goalIndex <= 0)
+        {
+            return;
+        }
+
+        int parentIndex = tree[goalIndex].parentIndex;
+        if (parentIndex >= 0)
+        {
+            PathPlanningVisualizationStep connectionStep = PathPlanningVisualizationBuilder.CreateStep(
+                PathPlanningVisualizationStepType.CandidatePathUpdated,
+                $"RRT 迭代 {iteration}：新节点已进入终点连接半径，成功连接终点。");
+            connectionStep.nodeUpdates.Add(PathPlanningVisualizationBuilder.CreateNode(
+                tree[parentIndex].position,
+                PathPlanningVisualizationNodeRole.Current,
+                iteration,
+                label: $"#{iteration}"));
+            connectionStep.nodeUpdates.Add(PathPlanningVisualizationBuilder.CreateNode(
+                request.targetPosition,
+                PathPlanningVisualizationNodeRole.Goal));
+            connectionStep.edgeUpdates.Add(PathPlanningVisualizationBuilder.CreateEdge(
+                tree[parentIndex].position,
+                request.targetPosition,
+                PathPlanningVisualizationEdgeRole.Tree,
+                iteration,
+                Vector3.Distance(tree[parentIndex].position, request.targetPosition)));
+            connectionStep.replaceCandidatePath = true;
+            connectionStep.candidatePath = BuildBranchPath(tree, goalIndex, request);
+            recorder.RecordStep(connectionStep);
+        }
+
+        PathPlanningVisualizationStep backtrackStep = PathPlanningVisualizationBuilder.CreateStep(
+            PathPlanningVisualizationStepType.BacktrackPathUpdated,
+            $"RRT 通过树回溯生成路径，原始回溯节点数 {rawWaypoints.Count}。");
+        backtrackStep.replaceBacktrackPath = true;
+        backtrackStep.backtrackPath = rawWaypoints != null ? new List<Vector3>(rawWaypoints) : new List<Vector3>();
+        recorder.RecordStep(backtrackStep);
+
+        PathPlanningVisualizationStep finalStep = PathPlanningVisualizationBuilder.CreateStep(
+            PathPlanningVisualizationStepType.FinalPathConfirmed,
+            $"RRT 已确认最终路径，迭代次数 {iteration}，最终路径点数 {finalPath.Count}。");
+        finalStep.replaceFinalPath = true;
+        finalStep.finalPath = finalPath != null ? new List<Vector3>(finalPath) : new List<Vector3>();
+        recorder.RecordStep(finalStep);
+    }
+
+    private static List<Vector3> BuildBranchPath(
+        List<RRTNode> tree,
+        int nodeIndex,
+        PathPlanningRequest request)
+    {
+        List<Vector3> reversed = new List<Vector3>();
+        int currentIndex = nodeIndex;
+
+        while (currentIndex >= 0)
+        {
+            reversed.Add(tree[currentIndex].position);
+            currentIndex = tree[currentIndex].parentIndex;
+        }
+
+        reversed.Reverse();
+        if (reversed.Count > 0)
+        {
+            reversed[0] = request.startPosition;
+        }
+
+        return reversed;
     }
 
     private static int CalculateIterationBudget(PathPlanningRequest request, float stepSize)

@@ -365,6 +365,7 @@
 - `StraightLinePlanner` 返回起点到终点的直线路径
 - `AStarPlanner` 在 `XZ` 平面网格上做静态障碍 A* 搜索
 - `RRTPlanner` 在 `XZ` 平面做确定性种子的随机扩展树搜索
+- 支持过程可视化的规划器还会通过 `IPathPlannerWithVisualization` 输出步骤事件，供后续统一回放
 
 ### 输出
 
@@ -383,7 +384,62 @@
 - `DroneManager`
 - `DroneStateMachine`
 
-## 9. 多无人机状态管理与仿真控制
+## 9. 路径规划算法过程可视化
+
+### 功能名称
+
+路径规划搜索过程演示
+
+### 功能目标
+
+让用户不只看到最终路径，还能观察不同规划算法在搜索阶段的节点扩展顺序、候选路径变化、回溯过程和最终路径生成方式。
+
+### 主要使用流程
+
+1. 启动仿真，触发无人机路径规划
+2. `DroneManager` 在规划时为当前无人机创建过程记录器
+3. 支持的规划器把步骤事件写入 `PathPlanningVisualizationRecorder`
+4. 运行时控制面板“算法过程演示”区域选择当前无人机
+5. 切换 `仅最终结果 / 完整过程 / 关键步骤`
+6. 使用 `播放/继续 / 暂停 / 单步 / 重置` 控制演示
+7. 观察状态卡、步骤说明卡和图例卡
+
+### 输入
+
+- 规划请求和规划结果
+- 规划器输出的步骤事件
+- 当前选中的无人机
+- 当前演示模式和播放速度
+
+### 处理
+
+- `AlgorithmVisualizerManager` 收集并注册每次规划的 `PathPlanningVisualizationTrace`
+- `PathPlanningVisualizationRecorder` 统一保存步骤帧、候选路径、回溯路径和最终路径
+- `PathPlanningVisualizationBuilder` 构建初始化帧、结束帧和 fallback 轨迹
+- `SimulationRuntimeControlPanel` 提供播放控制、无人机切换、模式切换、速度切换和图例说明
+- `PathPlanningProcessRenderer` 负责在场景中渲染已访问节点、当前扩展节点、候选边、回溯路径和最终路径
+
+### 输出
+
+- 场景中的过程节点和过程边
+- 当前步骤描述、步骤编号和播放状态
+- `仅最终结果 / 完整过程 / 关键步骤` 三种演示模式
+
+### 当前状态
+
+`已实现`
+
+### 依赖模块
+
+- `IPathPlannerWithVisualization`
+- `PathPlanningVisualizationRecorder`
+- `PathPlanningVisualizationBuilder`
+- `AlgorithmVisualizerManager`
+- `PathPlanningProcessRenderer`
+- `SimulationRuntimeControlPanel`
+- `DroneManager`
+
+## 10. 多无人机状态管理与仿真控制
 
 ### 功能名称
 
@@ -432,7 +488,7 @@
 - `DroneController`
 - `DroneManager`
 
-## 10. 飞行路径可视化与 2D 轨迹检查
+## 11. 飞行路径可视化与 2D 轨迹检查
 
 ### 功能名称
 
@@ -477,7 +533,7 @@
 - `DronePathVisualizer`
 - `DroneManager`
 
-## 11. 相机观察与状态展示
+## 12. 相机观察与状态展示
 
 ### 功能名称
 
@@ -521,7 +577,7 @@
 - `DroneManager`
 - `SimulationManager`
 
-## 12. 结果导出与数据记录
+## 13. 结果导出与数据记录
 
 ### 功能名称
 
@@ -566,7 +622,7 @@ CSV、JSON 和会话归档导出
 - `SimulationExperimentRecord`
 - `SimulationExperimentDetailExport`
 
-## 13. 批量实验与实验预设
+## 14. 批量实验与实验预设
 
 ### 功能名称
 
@@ -611,7 +667,7 @@ CSV、JSON 和会话归档导出
 - `BatchExperimentRunner`
 - `SimulationResultExporter`
 
-## 14. 测试、烟雾验证与打包
+## 15. 测试、烟雾验证与打包
 
 ### 功能名称
 
@@ -658,11 +714,11 @@ CSV、JSON 和会话归档导出
 - `KyUavBuildTools`
 - `KyUavEditModeBatchRunner`
 
-## 15. 当前没有实现的功能
+## 16. 当前没有实现的功能
 
 以下功能在当前仓库中没有闭环实现，文档中不应写成“已支持”：
 
-- 仿真结果回放
+- 批量实验结果总览回放与双算法并排对比界面
 - 系统内图表化对比面板
 - 多场景运行时加载与切换
 - 自定义障碍物布局持久化（保存/加载）

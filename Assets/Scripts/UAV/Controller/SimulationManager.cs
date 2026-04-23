@@ -26,6 +26,10 @@ public class SimulationManager : MonoBehaviour
     [Tooltip("批量实验执行器")]
     public BatchExperimentRunner batchExperimentRunner;
 
+    [Header("算法过程可视化")]
+    [Tooltip("算法过程可视化管理器")]
+    public AlgorithmVisualizerManager algorithmVisualizerManager;
+
     [Header("任务设置")]
     [Tooltip("当场景中没有任务点时，自动尝试从 Resources 导入默认任务点")]
     public bool autoImportTasksWhenMissing = true;
@@ -199,6 +203,10 @@ public class SimulationManager : MonoBehaviour
 
         ResetAllTaskPointsInScene();
         elapsedSimulationTime = 0f;
+        if (algorithmVisualizerManager != null)
+        {
+            algorithmVisualizerManager.ClearAllTraces();
+        }
 
         // 如果有 DroneManager，给无人机分配任务点
         if (droneManager != null)
@@ -275,6 +283,10 @@ public class SimulationManager : MonoBehaviour
 
         ResetAllTaskPointsInScene();
         elapsedSimulationTime = 0f;
+        if (algorithmVisualizerManager != null)
+        {
+            algorithmVisualizerManager.ClearAllTraces();
+        }
         if (resultExporter != null)
         {
             resultExporter.ResetRunTracking();
@@ -302,6 +314,15 @@ public class SimulationManager : MonoBehaviour
             obstacleEditor = gameObject.AddComponent<RuntimeObstacleEditor>();
         }
 
+        if (algorithmVisualizerManager == null)
+        {
+            algorithmVisualizerManager = GetComponent<AlgorithmVisualizerManager>();
+            if (algorithmVisualizerManager == null)
+            {
+                algorithmVisualizerManager = gameObject.AddComponent<AlgorithmVisualizerManager>();
+            }
+        }
+
         runtimeControlPanel.simulationManager = this;
         if (runtimeControlPanel.droneManager == null)
         {
@@ -309,6 +330,7 @@ public class SimulationManager : MonoBehaviour
         }
         runtimeControlPanel.spawnPointManager = spawnPointManager;
         runtimeControlPanel.obstacleEditor = obstacleEditor;
+        runtimeControlPanel.algorithmVisualizerManager = algorithmVisualizerManager;
 
         if (resultExporter == null)
         {
@@ -355,6 +377,16 @@ public class SimulationManager : MonoBehaviour
 
         runtimeControlPanel.resultExporter = resultExporter;
         runtimeControlPanel.batchExperimentRunner = batchExperimentRunner;
+
+        algorithmVisualizerManager.simulationManager = this;
+        if (algorithmVisualizerManager.droneManager == null)
+        {
+            algorithmVisualizerManager.droneManager = droneManager;
+        }
+        if (algorithmVisualizerManager.cameraManager == null)
+        {
+            algorithmVisualizerManager.cameraManager = FindObjectOfType<CameraManager>();
+        }
     }
 
     private void ResetAllTaskPointsInScene()
