@@ -45,7 +45,7 @@ public class TaskPointUIManager : MonoBehaviour
     {
         if (cameraManager == null)
         {
-            cameraManager = FindObjectOfType<CameraManager>();
+            cameraManager = RuntimeSceneRegistry.Get<CameraManager>(this);
         }
 
         addTaskButtonLabel = addTaskButton != null ? addTaskButton.GetComponentInChildren<TMP_Text>() : null;

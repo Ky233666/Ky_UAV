@@ -24,6 +24,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
     public DroneManager droneManager;
     public CameraManager cameraManager;
     public PathPlanningProcessRenderer processRenderer;
+    public ObstacleTransparencyController obstacleTransparencyController;
 
     [Header("Playback")]
     public PathPlanningVisualizationMode visualizationMode = PathPlanningVisualizationMode.FullProcess;
@@ -31,6 +32,9 @@ public class AlgorithmVisualizerManager : MonoBehaviour
     public bool autoSelectLatestTrace = true;
     public bool autoplayOnNewTrace = false;
     public float baseSecondsPerStep = 0.18f;
+
+    [Header("Visibility Aid")]
+    public bool obstacleTransparencyEnabled = true;
 
     private readonly Dictionary<int, PathPlanningVisualizationTrace> tracesByDroneId = new Dictionary<int, PathPlanningVisualizationTrace>();
     private readonly List<int> playbackSequence = new List<int>();
@@ -43,17 +47,22 @@ public class AlgorithmVisualizerManager : MonoBehaviour
     private PathPlanningVisualizationPlaybackState playbackState = PathPlanningVisualizationPlaybackState.Ready;
 
     public PathPlanningVisualizationPlaybackState PlaybackState => playbackState;
+    public bool ObstacleTransparencyEnabled => obstacleTransparencyEnabled;
+    public bool ObstacleTransparencyActive =>
+        obstacleTransparencyController != null && obstacleTransparencyController.IsTransparent;
 
     private void Awake()
     {
         CacheReferences();
         EnsureRenderer();
+        EnsureObstacleTransparencyController();
     }
 
     private void Start()
     {
         CacheReferences();
         EnsureRenderer();
+        EnsureObstacleTransparencyController();
         RefreshRenderer();
     }
 
@@ -61,10 +70,14 @@ public class AlgorithmVisualizerManager : MonoBehaviour
     {
         CacheReferences();
         EnsureRenderer();
+        EnsureObstacleTransparencyController();
 
         if (playbackState != PathPlanningVisualizationPlaybackState.Playing)
         {
-            RefreshRendererProjection();
+            if (RefreshRendererProjection())
+            {
+                RefreshRenderer();
+            }
             return;
         }
 
@@ -73,6 +86,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
         {
             playbackState = PathPlanningVisualizationPlaybackState.Ready;
             RefreshRenderer();
+            ApplyObstacleTransparencyState();
             return;
         }
 
@@ -89,7 +103,20 @@ public class AlgorithmVisualizerManager : MonoBehaviour
             }
         }
 
-        RefreshRendererProjection();
+        if (RefreshRendererProjection())
+        {
+            RefreshRenderer();
+        }
+
+        ApplyObstacleTransparencyState();
+    }
+
+    private void OnDisable()
+    {
+        if (obstacleTransparencyController != null)
+        {
+            obstacleTransparencyController.SetTransparent(false);
+        }
     }
 
     public PathPlanningVisualizationRecorder CreateRecorder(
@@ -164,6 +191,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
         }
 
         playbackState = PathPlanningVisualizationPlaybackState.Playing;
+        ApplyObstacleTransparencyState();
     }
 
     public void Pause()
@@ -172,6 +200,8 @@ public class AlgorithmVisualizerManager : MonoBehaviour
         {
             playbackState = PathPlanningVisualizationPlaybackState.Paused;
         }
+
+        ApplyObstacleTransparencyState();
     }
 
     public void Resume()
@@ -185,10 +215,13 @@ public class AlgorithmVisualizerManager : MonoBehaviour
         {
             playbackState = PathPlanningVisualizationPlaybackState.Playing;
         }
-        else if (playbackState == PathPlanningVisualizationPlaybackState.Ready)
+        else if (playbackState == PathPlanningVisualizationPlaybackState.Ready ||
+                 playbackState == PathPlanningVisualizationPlaybackState.Completed)
         {
             Play();
         }
+
+        ApplyObstacleTransparencyState();
     }
 
     public void ResetPlayback()
@@ -199,6 +232,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
         playbackState = PathPlanningVisualizationPlaybackState.Ready;
         runtimeState.Reset();
         RefreshRenderer();
+        ApplyObstacleTransparencyState();
     }
 
     public void StepForward()
@@ -220,6 +254,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
         }
 
         AdvanceToNextStep();
+        ApplyObstacleTransparencyState();
     }
 
     public void SelectPreviousDrone()
@@ -282,6 +317,22 @@ public class AlgorithmVisualizerManager : MonoBehaviour
     {
         PathPlanningVisualizationTrace trace = GetActiveTrace();
         return trace != null && trace.HasSteps();
+    }
+
+    public void SetObstacleTransparencyEnabled(bool enabled)
+    {
+        obstacleTransparencyEnabled = enabled;
+        ApplyObstacleTransparencyState();
+    }
+
+    public string GetObstacleTransparencyLabel()
+    {
+        if (!obstacleTransparencyEnabled)
+        {
+            return "关闭";
+        }
+
+        return ObstacleTransparencyActive ? "已半透明" : "待播放";
     }
 
     public string GetSelectedDroneLabel()
@@ -423,20 +474,13 @@ public class AlgorithmVisualizerManager : MonoBehaviour
 
     private void CacheReferences()
     {
-        if (simulationManager == null)
-        {
-            simulationManager = FindObjectOfType<SimulationManager>();
-        }
-
-        if (droneManager == null)
-        {
-            droneManager = FindObjectOfType<DroneManager>();
-        }
-
-        if (cameraManager == null)
-        {
-            cameraManager = FindObjectOfType<CameraManager>();
-        }
+        simulationManager = RuntimeSceneRegistry.Resolve(simulationManager, this);
+        droneManager = RuntimeSceneRegistry.Resolve(
+            droneManager,
+            simulationManager != null ? simulationManager.droneManager : null,
+            this);
+        cameraManager = RuntimeSceneRegistry.Resolve(cameraManager, this);
+        obstacleTransparencyController = RuntimeSceneRegistry.Resolve(obstacleTransparencyController, this);
     }
 
     private void EnsureRenderer()
@@ -448,6 +492,24 @@ public class AlgorithmVisualizerManager : MonoBehaviour
             {
                 processRenderer = gameObject.AddComponent<PathPlanningProcessRenderer>();
             }
+        }
+    }
+
+    private void EnsureObstacleTransparencyController()
+    {
+        if (obstacleTransparencyController == null)
+        {
+            obstacleTransparencyController = GetComponent<ObstacleTransparencyController>();
+            if (obstacleTransparencyController == null)
+            {
+                obstacleTransparencyController = gameObject.AddComponent<ObstacleTransparencyController>();
+            }
+        }
+
+        obstacleTransparencyController.droneManager = droneManager;
+        if (droneManager != null && droneManager.obstacleRoot != null)
+        {
+            obstacleTransparencyController.obstacleRoot = droneManager.obstacleRoot;
         }
     }
 
@@ -471,6 +533,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
         {
             AdvanceToSequenceCursor(0);
             playbackState = PathPlanningVisualizationPlaybackState.Completed;
+            ApplyObstacleTransparencyState();
         }
     }
 
@@ -480,6 +543,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
         {
             playbackState = PathPlanningVisualizationPlaybackState.Ready;
             RefreshRenderer();
+            ApplyObstacleTransparencyState();
             return false;
         }
 
@@ -488,6 +552,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
         {
             playbackState = PathPlanningVisualizationPlaybackState.Completed;
             RefreshRenderer();
+            ApplyObstacleTransparencyState();
             return false;
         }
 
@@ -645,6 +710,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
     {
         if (processRenderer == null)
         {
+            ApplyObstacleTransparencyState();
             return;
         }
 
@@ -652,25 +718,42 @@ public class AlgorithmVisualizerManager : MonoBehaviour
         if (trace == null)
         {
             processRenderer.ClearVisualization();
+            ApplyObstacleTransparencyState();
             return;
         }
 
         RefreshRendererProjection();
         processRenderer.RenderTrace(trace, runtimeState);
+        ApplyObstacleTransparencyState();
     }
 
-    private void RefreshRendererProjection()
+    private bool RefreshRendererProjection()
     {
         if (processRenderer == null)
         {
-            return;
+            return false;
         }
 
         bool useTopDownProjection = cameraManager != null && cameraManager.isTopDown2D;
         float projectionHeight = droneManager != null
             ? droneManager.CalculatePathProjectionHeight() + 0.35f
             : 12f;
-        processRenderer.SetProjectionMode(useTopDownProjection, projectionHeight);
+        return processRenderer.SetProjectionMode(useTopDownProjection, projectionHeight);
+    }
+
+    private void ApplyObstacleTransparencyState()
+    {
+        if (obstacleTransparencyController == null)
+        {
+            return;
+        }
+
+        bool shouldMakeTransparent =
+            obstacleTransparencyEnabled &&
+            HasPlayableTrace() &&
+            playbackState != PathPlanningVisualizationPlaybackState.Ready;
+
+        obstacleTransparencyController.SetTransparent(shouldMakeTransparent);
     }
 
     private PathPlanningVisualizationTrace GetActiveTrace()

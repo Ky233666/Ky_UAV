@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -95,5 +97,134 @@ public class PathPlanningVisualizationTests
             Assert.AreEqual(PathPlanningVisualizationNodeRole.Visited, node.role);
             Assert.AreEqual(string.Empty, node.label);
         }
+    }
+
+    [Test]
+    public void AlgorithmVisualizer_ResumeFromCompleted_RestartsPlayback()
+    {
+        GameObject managerObject = new GameObject("AlgorithmVisualizer");
+        try
+        {
+            PathPlanningProcessRenderer renderer = managerObject.AddComponent<PathPlanningProcessRenderer>();
+            AlgorithmVisualizerManager manager = managerObject.AddComponent<AlgorithmVisualizerManager>();
+            manager.processRenderer = renderer;
+            manager.visualizationMode = PathPlanningVisualizationMode.FullProcess;
+
+            manager.RegisterPlanningTrace(CreateFinalPathTrace());
+            manager.StepForward();
+            manager.StepForward();
+
+            Assert.AreEqual(PathPlanningVisualizationPlaybackState.Completed, manager.PlaybackState);
+
+            manager.Resume();
+
+            Assert.AreEqual(PathPlanningVisualizationPlaybackState.Playing, manager.PlaybackState);
+            Assert.AreEqual("0 / 2", manager.GetCurrentStepLabel());
+        }
+        finally
+        {
+            Object.DestroyImmediate(managerObject);
+        }
+    }
+
+    [Test]
+    public void AlgorithmVisualizer_ReprojectsRenderedTrace_WhenProjectionModeChanges()
+    {
+        GameObject managerObject = new GameObject("AlgorithmVisualizer");
+        GameObject cameraObject = new GameObject("CameraManager");
+        try
+        {
+            PathPlanningProcessRenderer renderer = managerObject.AddComponent<PathPlanningProcessRenderer>();
+            AlgorithmVisualizerManager manager = managerObject.AddComponent<AlgorithmVisualizerManager>();
+            CameraManager cameraManager = cameraObject.AddComponent<CameraManager>();
+
+            manager.processRenderer = renderer;
+            manager.cameraManager = cameraManager;
+            manager.visualizationMode = PathPlanningVisualizationMode.FinalResultOnly;
+
+            manager.RegisterPlanningTrace(CreateFinalPathTrace());
+            LineRenderer finalPathRenderer = FindRenderer(managerObject.transform, "FinalPath");
+            Assert.NotNull(finalPathRenderer);
+            Assert.IsTrue(finalPathRenderer.enabled);
+            Assert.AreEqual(5f + renderer.markerOffsetY, finalPathRenderer.GetPosition(0).y, 0.001f);
+
+            cameraManager.isTopDown2D = true;
+            InvokePrivateUpdate(manager);
+
+            Assert.AreEqual(12f + renderer.markerOffsetY, finalPathRenderer.GetPosition(0).y, 0.001f);
+        }
+        finally
+        {
+            Object.DestroyImmediate(managerObject);
+            Object.DestroyImmediate(cameraObject);
+        }
+    }
+
+    private static PathPlanningVisualizationTrace CreateFinalPathTrace()
+    {
+        PathPlanningRequest request = new PathPlanningRequest
+        {
+            droneId = 7,
+            startPosition = new Vector3(0f, 5f, 0f),
+            targetPosition = new Vector3(4f, 5f, 0f)
+        };
+
+        List<Vector3> finalPath = new List<Vector3>
+        {
+            request.startPosition,
+            request.targetPosition
+        };
+
+        PathPlanningVisualizationStep initializeStep = PathPlanningVisualizationBuilder.CreateStep(
+            PathPlanningVisualizationStepType.Initialize,
+            "Initialize");
+        initializeStep.nodeUpdates.Add(PathPlanningVisualizationBuilder.CreateNode(
+            request.startPosition,
+            PathPlanningVisualizationNodeRole.Start));
+        initializeStep.nodeUpdates.Add(PathPlanningVisualizationBuilder.CreateNode(
+            request.targetPosition,
+            PathPlanningVisualizationNodeRole.Goal));
+
+        PathPlanningVisualizationStep finalStep = PathPlanningVisualizationBuilder.CreateStep(
+            PathPlanningVisualizationStepType.FinalPathConfirmed,
+            "Final path");
+        finalStep.replaceFinalPath = true;
+        finalStep.finalPath = finalPath;
+        finalStep.markSearchComplete = true;
+        finalStep.markSearchSucceeded = true;
+
+        return new PathPlanningVisualizationTrace
+        {
+            droneId = request.droneId,
+            droneName = "Drone 07",
+            plannerType = PathPlannerType.AStar,
+            plannerName = "AStar",
+            plannerDisplayName = "A*",
+            accentColor = Color.cyan,
+            request = request,
+            finalPath = finalPath,
+            success = true,
+            steps = new List<PathPlanningVisualizationStep>
+            {
+                initializeStep,
+                finalStep
+            }
+        };
+    }
+
+    private static LineRenderer FindRenderer(Transform root, string childName)
+    {
+        Transform renderRoot = root.Find("__PathPlanningProcessRenderer");
+        Assert.NotNull(renderRoot);
+        Transform child = renderRoot.Find(childName);
+        Assert.NotNull(child);
+        return child.GetComponent<LineRenderer>();
+    }
+
+    private static void InvokePrivateUpdate(AlgorithmVisualizerManager manager)
+    {
+        typeof(AlgorithmVisualizerManager)
+            .GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)
+            .Invoke(manager, null);
     }
 }

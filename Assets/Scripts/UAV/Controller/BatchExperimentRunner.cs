@@ -252,7 +252,7 @@ public class BatchExperimentRunner : MonoBehaviour
             return false;
         }
 
-        TaskPoint[] taskPoints = FindObjectsOfType<TaskPoint>();
+        TaskPoint[] taskPoints = SimulationContext.GetOrCreate(this).GetTaskPoints();
         if (taskPoints.Length == 0)
         {
             return false;
@@ -271,32 +271,12 @@ public class BatchExperimentRunner : MonoBehaviour
 
     private void CacheReferences()
     {
-        if (simulationManager == null)
-        {
-            simulationManager = GetComponent<SimulationManager>();
-            if (simulationManager == null)
-            {
-                simulationManager = FindObjectOfType<SimulationManager>();
-            }
-        }
-
-        if (resultExporter == null)
-        {
-            resultExporter = GetComponent<SimulationResultExporter>();
-            if (resultExporter == null)
-            {
-                resultExporter = FindObjectOfType<SimulationResultExporter>();
-            }
-        }
-
-        if (droneManager == null)
-        {
-            droneManager = simulationManager != null ? simulationManager.droneManager : null;
-            if (droneManager == null)
-            {
-                droneManager = FindObjectOfType<DroneManager>();
-            }
-        }
+        simulationManager = RuntimeSceneRegistry.Resolve(simulationManager, this);
+        resultExporter = RuntimeSceneRegistry.Resolve(resultExporter, this);
+        droneManager = RuntimeSceneRegistry.Resolve(
+            droneManager,
+            simulationManager != null ? simulationManager.droneManager : null,
+            this);
     }
 
     private ExperimentPreset ResolvePreset()

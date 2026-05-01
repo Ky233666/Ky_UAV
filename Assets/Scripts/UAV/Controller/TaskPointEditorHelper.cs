@@ -36,6 +36,7 @@ public class TaskPointEditorHelper : MonoBehaviour
             {
                 taskPoint.taskId = startId + i;
                 taskPoint.taskName = $"巡检点 {startId + i}";
+                SimulationContext.GetOrCreate(this).RegisterTaskPoint(taskPoint);
             }
         }
 
@@ -48,11 +49,14 @@ public class TaskPointEditorHelper : MonoBehaviour
     [ContextMenu("Clear All Task Points")]
     public void ClearAllTaskPoints()
     {
-        var allTaskPoints = FindObjectsOfType<TaskPoint>();
+        SimulationContext context = SimulationContext.GetOrCreate(this);
+        var allTaskPoints = context.GetTaskPoints();
         foreach (var tp in allTaskPoints)
         {
+            context.UnregisterTaskPoint(tp, false);
             DestroyImmediate(tp.gameObject);
         }
+        context.NotifyTasksChanged();
         Debug.Log($"[TaskPointEditorHelper] 已清除 {allTaskPoints.Length} 个任务点");
     }
 }

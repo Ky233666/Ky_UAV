@@ -1,7 +1,8 @@
 {
   "name": "KyUAV.EditMode.Tests",
   "references": [
-    "KyUAV.Runtime"
+    "KyUAV.Runtime",
+    "Unity.TextMeshPro"
   ],
   "includePlatforms": [
     "Editor"

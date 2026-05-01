@@ -124,11 +124,13 @@ public class RuntimeObstacleEditor : MonoBehaviour
             return;
         }
 
-        RuntimeObstacleMarker[] markers = FindObjectsOfType<RuntimeObstacleMarker>();
+        SimulationContext context = SimulationContext.GetOrCreate(this);
+        RuntimeObstacleMarker[] markers = context.GetRuntimeObstacleMarkers();
         for (int i = 0; i < markers.Length; i++)
         {
             if (markers[i] != null)
             {
+                context.UnregisterObstacle(markers[i], false);
                 Destroy(markers[i].gameObject);
             }
         }
@@ -136,6 +138,7 @@ public class RuntimeObstacleEditor : MonoBehaviour
         CancelCurrentDrag();
         isCreateMode = false;
         isDeleteMode = false;
+        context.NotifyObstaclesChanged();
         RequestObstacleRefresh();
         Debug.Log("[RuntimeObstacleEditor] 已清空全部自定义障碍物。");
     }
@@ -178,29 +181,17 @@ public class RuntimeObstacleEditor : MonoBehaviour
 
     public int GetCustomObstacleCount()
     {
-        return FindObjectsOfType<RuntimeObstacleMarker>().Length;
+        return SimulationContext.GetOrCreate(this).GetRuntimeObstacleMarkers().Length;
     }
 
     private void CacheReferences()
     {
-        if (simulationManager == null)
-        {
-            simulationManager = GetComponent<SimulationManager>();
-            if (simulationManager == null)
-            {
-                simulationManager = FindObjectOfType<SimulationManager>();
-            }
-        }
-
-        if (droneManager == null)
-        {
-            droneManager = simulationManager != null ? simulationManager.droneManager : FindObjectOfType<DroneManager>();
-        }
-
-        if (cameraManager == null)
-        {
-            cameraManager = FindObjectOfType<CameraManager>();
-        }
+        simulationManager = RuntimeSceneRegistry.Resolve(simulationManager, this);
+        droneManager = RuntimeSceneRegistry.Resolve(
+            droneManager,
+            simulationManager != null ? simulationManager.droneManager : null,
+            this);
+        cameraManager = RuntimeSceneRegistry.Resolve(cameraManager, this);
 
         LoadObstacleCatalogIfNeeded();
     }
@@ -416,6 +407,7 @@ public class RuntimeObstacleEditor : MonoBehaviour
             return;
         }
 
+        SimulationContext.GetOrCreate(this).UnregisterObstacle(marker);
         Destroy(marker.gameObject);
         RequestObstacleRefresh();
         Debug.Log($"[RuntimeObstacleEditor] 已删除自定义障碍物 #{marker.obstacleId:D2}。");
@@ -565,7 +557,8 @@ public class RuntimeObstacleEditor : MonoBehaviour
     {
         failureReason = string.Empty;
 
-        TaskPoint[] taskPoints = FindObjectsOfType<TaskPoint>();
+        SimulationContext context = SimulationContext.GetOrCreate(this);
+        TaskPoint[] taskPoints = context.GetTaskPoints();
         for (int i = 0; i < taskPoints.Length; i++)
         {
             TaskPoint taskPoint = taskPoints[i];
@@ -581,7 +574,7 @@ public class RuntimeObstacleEditor : MonoBehaviour
             }
         }
 
-        DroneSpawnPointMarker[] spawnPointMarkers = FindObjectsOfType<DroneSpawnPointMarker>();
+        DroneSpawnPointMarker[] spawnPointMarkers = context.GetSpawnPointMarkers();
         for (int i = 0; i < spawnPointMarkers.Length; i++)
         {
             DroneSpawnPointMarker spawnPointMarker = spawnPointMarkers[i];
@@ -673,6 +666,7 @@ public class RuntimeObstacleEditor : MonoBehaviour
         RuntimeObstacleMarker marker = obstacleObject.AddComponent<RuntimeObstacleMarker>();
         marker.obstacleId = nextObstacleId++;
         marker.templateDisplayName = templateDisplayName;
+        SimulationContext.GetOrCreate(this).RegisterObstacle(marker);
 
         EnsureObstacleAwarePlanning();
         droneManager?.RefreshObstacleConfiguration();
@@ -887,6 +881,8 @@ public class RuntimeObstacleEditor : MonoBehaviour
 
     private void RequestObstacleRefresh()
     {
+        SimulationContext.Current?.NotifyObstaclesChanged();
+
         if (droneManager == null)
         {
             return;
@@ -910,7 +906,7 @@ public class RuntimeObstacleEditor : MonoBehaviour
     private int GetMaxObstacleId()
     {
         int maxObstacleId = 0;
-        RuntimeObstacleMarker[] markers = FindObjectsOfType<RuntimeObstacleMarker>();
+        RuntimeObstacleMarker[] markers = SimulationContext.GetOrCreate(this).GetRuntimeObstacleMarkers();
         for (int i = 0; i < markers.Length; i++)
         {
             if (markers[i] != null)

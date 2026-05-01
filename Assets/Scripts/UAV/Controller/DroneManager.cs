@@ -14,6 +14,7 @@ public class DroneManager : MonoBehaviour
     private readonly List<Bounds> obstacleFootprintBounds = new List<Bounds>();
     private bool obstacleFootprintCacheInitialized;
     private AlgorithmVisualizerManager algorithmVisualizerManager;
+    private SimulationContext simulationContext;
 
     [Header("无人机 Prefab")]
     [Tooltip("无人机 Prefab")]
@@ -118,6 +119,24 @@ public class DroneManager : MonoBehaviour
             return;
         }
         Instance = this;
+        RuntimeSceneRegistry.Register(this);
+    }
+
+    private void OnEnable()
+    {
+        simulationContext = SimulationContext.GetOrCreate(this);
+        simulationContext.ObstaclesChanged += HandleRuntimeObstaclesChanged;
+    }
+
+    private void OnDisable()
+    {
+        if (simulationContext == null)
+        {
+            return;
+        }
+
+        simulationContext.ObstaclesChanged -= HandleRuntimeObstaclesChanged;
+        simulationContext = null;
     }
 
     void Start()
@@ -203,7 +222,7 @@ public class DroneManager : MonoBehaviour
                     droneName = drone.droneName,
                     speed = drone.speed,
                     state = DroneState.Idle,
-                    lastKnownPosition = drone.transform.position
+                    lastKnownPosition = ToCruisePosition(drone.transform.position)
                 };
                 droneDataList.Add(data);
 
@@ -281,6 +300,7 @@ public class DroneManager : MonoBehaviour
             if (drone != null)
             {
                 drone.Reset();
+                SnapDroneToCruiseHeight(drone);
 
                 DronePathVisualizer pathVisualizer = drone.GetComponent<DronePathVisualizer>();
                 if (pathVisualizer != null)
@@ -349,6 +369,37 @@ public class DroneManager : MonoBehaviour
         planningWorldMax = worldMax;
 
         RefreshObstacleConfiguration();
+    }
+
+    public Vector3 ToCruisePosition(Vector3 position)
+    {
+        return new Vector3(position.x, cruiseHeight, position.z);
+    }
+
+    public List<Vector3> NormalizePathToCruiseHeight(List<Vector3> path)
+    {
+        if (path == null)
+        {
+            return new List<Vector3>();
+        }
+
+        List<Vector3> normalizedPath = new List<Vector3>(path.Count);
+        for (int i = 0; i < path.Count; i++)
+        {
+            normalizedPath.Add(ToCruisePosition(path[i]));
+        }
+
+        return normalizedPath;
+    }
+
+    public void SnapDroneToCruiseHeight(DroneController drone)
+    {
+        if (drone == null)
+        {
+            return;
+        }
+
+        drone.transform.position = ToCruisePosition(drone.transform.position);
     }
 
     void LateUpdate()
@@ -455,6 +506,12 @@ public class DroneManager : MonoBehaviour
         {
             RefreshObstacleFootprintCache();
         }
+    }
+
+    private void HandleRuntimeObstaclesChanged()
+    {
+        obstacleFootprintCacheInitialized = false;
+        RefreshObstacleConfiguration();
     }
 
     public Transform EnsureObstacleRootExists()
@@ -706,6 +763,9 @@ public class DroneManager : MonoBehaviour
     {
         switch (plannerType)
         {
+            case PathPlannerType.QLearningOffline:
+                return new OfflineQlearningPathPlanner();
+
             case PathPlannerType.RRT:
                 return new RRTPlanner();
 
@@ -759,10 +819,8 @@ public class DroneManager : MonoBehaviour
         }
 
         IPathPlanner planner = CreatePathPlanner(plannerType);
-        Vector3 startPosition = drone.transform.position;
-        startPosition.y = cruiseHeight;
-        Vector3 targetPosition = taskPoint.transform.position;
-        targetPosition.y = cruiseHeight;
+        Vector3 startPosition = ToCruisePosition(drone.transform.position);
+        Vector3 targetPosition = ToCruisePosition(taskPoint.transform.position);
         PathPlanningRequest request = new PathPlanningRequest
         {
             droneId = droneId,
@@ -783,6 +841,8 @@ public class DroneManager : MonoBehaviour
         PathPlanningResult result = planner is IPathPlannerWithVisualization visualizationPlanner && recorder != null
             ? visualizationPlanner.PlanPath(request, recorder)
             : planner.PlanPath(request);
+
+        NormalizePlanningResultToCruiseHeight(result);
 
         if (recorder != null && visualizer != null)
         {
@@ -809,12 +869,35 @@ public class DroneManager : MonoBehaviour
 
     private AlgorithmVisualizerManager ResolveAlgorithmVisualizerManager()
     {
-        if (algorithmVisualizerManager == null)
+        algorithmVisualizerManager = RuntimeSceneRegistry.Resolve(algorithmVisualizerManager, this);
+        return algorithmVisualizerManager;
+    }
+
+    private void NormalizePlanningResultToCruiseHeight(PathPlanningResult result)
+    {
+        if (result == null)
         {
-            algorithmVisualizerManager = FindObjectOfType<AlgorithmVisualizerManager>();
+            return;
         }
 
-        return algorithmVisualizerManager;
+        result.waypoints = NormalizePathToCruiseHeight(result.waypoints);
+        result.totalCost = CalculatePathLength(result.waypoints);
+    }
+
+    private static float CalculatePathLength(List<Vector3> path)
+    {
+        if (path == null || path.Count <= 1)
+        {
+            return 0f;
+        }
+
+        float length = 0f;
+        for (int i = 1; i < path.Count; i++)
+        {
+            length += Vector3.Distance(path[i - 1], path[i]);
+        }
+
+        return length;
     }
 
     /// <summary>
@@ -832,7 +915,7 @@ public class DroneManager : MonoBehaviour
             DroneData data = GetDroneData(drone.droneId);
             if (data != null)
             {
-                data.lastKnownPosition = drone.transform.position;
+                data.lastKnownPosition = ToCruisePosition(drone.transform.position);
             }
         }
     }
@@ -873,7 +956,7 @@ public class DroneManager : MonoBehaviour
 
     private void BindCamerasToManagedDrones()
     {
-        CameraManager cameraManager = FindObjectOfType<CameraManager>();
+        CameraManager cameraManager = RuntimeSceneRegistry.Get<CameraManager>(this);
         if (cameraManager == null)
         {
             return;
@@ -1203,7 +1286,7 @@ public class DroneManager : MonoBehaviour
 
     private Vector3 AdjustSpawnHeight(Vector3 position)
     {
-        return new Vector3(position.x, Mathf.Max(position.y, cruiseHeight), position.z);
+        return ToCruisePosition(position);
     }
 
     private void ApplyConfigToRuntimeObjects(DroneConfig config)
@@ -1244,7 +1327,7 @@ public class DroneManager : MonoBehaviour
             }
         }
 
-        DroneSpawnPointMarker[] markers = FindObjectsOfType<DroneSpawnPointMarker>();
+        DroneSpawnPointMarker[] markers = SimulationContext.GetOrCreate(this).GetSpawnPointMarkers();
         System.Array.Sort(markers, (left, right) =>
         {
             int orderCompare = left.orderIndex.CompareTo(right.orderIndex);
@@ -1308,6 +1391,7 @@ public class DroneManager : MonoBehaviour
                 }
 
                 Vector3 delta = right.transform.position - left.transform.position;
+                delta.y = 0f;
                 float distanceSq = delta.sqrMagnitude;
                 if (distanceSq >= minDistanceSq)
                 {
@@ -1339,18 +1423,22 @@ public class DroneManager : MonoBehaviour
         if (leftWaiting && !rightWaiting)
         {
             left.transform.position -= correction;
+            SnapDroneToCruiseHeight(left);
             return;
         }
 
         if (!leftWaiting && rightWaiting)
         {
             right.transform.position += correction;
+            SnapDroneToCruiseHeight(right);
             return;
         }
 
         Vector3 halfCorrection = correction * 0.5f;
         left.transform.position -= halfCorrection;
         right.transform.position += halfCorrection;
+        SnapDroneToCruiseHeight(left);
+        SnapDroneToCruiseHeight(right);
     }
 
     private Vector3 BuildFallbackSeparationDirection(int leftIndex, int rightIndex)
@@ -1372,7 +1460,7 @@ public class DroneManager : MonoBehaviour
             DroneData data = GetDroneData(drone.droneId);
             if (data != null)
             {
-                data.lastKnownPosition = drone.transform.position;
+                data.lastKnownPosition = ToCruisePosition(drone.transform.position);
             }
         }
     }

@@ -18,6 +18,11 @@ public class SchedulingAlgorithmTests
         }
 
         createdObjects.Clear();
+
+        if (SimulationContext.Current != null)
+        {
+            Object.DestroyImmediate(SimulationContext.Current.gameObject);
+        }
     }
 
     [Test]

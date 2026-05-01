@@ -49,6 +49,13 @@ public class DroneSpawnPointUIManager : MonoBehaviour
     private int nextOrderIndex;
     private LineRenderer placementPreviewRenderer;
     private DroneSpawnPointMarker selectedMarkerForMove;
+    private SimulationContext simulationContext;
+
+    private void OnEnable()
+    {
+        simulationContext = SimulationContext.GetOrCreate(this);
+        simulationContext.SpawnPointsChanged += HandleSpawnPointsChanged;
+    }
 
     private void Start()
     {
@@ -118,41 +125,36 @@ public class DroneSpawnPointUIManager : MonoBehaviour
     {
         SetInteractionModes(false, false, false);
 
-        DroneSpawnPointMarker[] markers = FindObjectsOfType<DroneSpawnPointMarker>();
+        SimulationContext context = SimulationContext.GetOrCreate(this);
+        DroneSpawnPointMarker[] markers = context.GetSpawnPointMarkers();
         for (int i = 0; i < markers.Length; i++)
         {
             if (markers[i] != null)
             {
+                context.UnregisterSpawnPoint(markers[i], false);
                 Destroy(markers[i].gameObject);
             }
         }
 
         nextOrderIndex = 0;
+        context.NotifySpawnPointsChanged();
         RespawnFleetIfAllowed();
         Debug.Log("[DroneSpawnPointUIManager] 已清空所有手动起飞点。");
     }
 
     public int GetSpawnPointCount()
     {
-        return FindObjectsOfType<DroneSpawnPointMarker>().Length;
+        return SimulationContext.GetOrCreate(this).GetSpawnPointMarkers().Length;
     }
 
     private void CacheReferences()
     {
-        if (simulationManager == null)
-        {
-            simulationManager = FindObjectOfType<SimulationManager>();
-        }
-
-        if (droneManager == null)
-        {
-            droneManager = simulationManager != null ? simulationManager.droneManager : FindObjectOfType<DroneManager>();
-        }
-
-        if (cameraManager == null)
-        {
-            cameraManager = FindObjectOfType<CameraManager>();
-        }
+        simulationManager = RuntimeSceneRegistry.Resolve(simulationManager, this);
+        droneManager = RuntimeSceneRegistry.Resolve(
+            droneManager,
+            simulationManager != null ? simulationManager.droneManager : null,
+            this);
+        cameraManager = RuntimeSceneRegistry.Resolve(cameraManager, this);
     }
 
     private void HandlePlacementInput()
@@ -395,7 +397,7 @@ public class DroneSpawnPointUIManager : MonoBehaviour
         placementPosition = GetGroundedPosition(rawPoint);
         failureReason = string.Empty;
 
-        DroneSpawnPointMarker[] existingMarkers = FindObjectsOfType<DroneSpawnPointMarker>();
+        DroneSpawnPointMarker[] existingMarkers = SimulationContext.GetOrCreate(this).GetSpawnPointMarkers();
         float minimumDistance = Mathf.Max(0.5f, minimumSpawnPointSpacing);
         for (int i = 0; i < existingMarkers.Length; i++)
         {
@@ -437,6 +439,7 @@ public class DroneSpawnPointUIManager : MonoBehaviour
 
         DroneSpawnPointMarker marker = markerObject.AddComponent<DroneSpawnPointMarker>();
         marker.orderIndex = nextOrderIndex++;
+        SimulationContext.GetOrCreate(this).RegisterSpawnPoint(marker);
 
         TryAssignSpawnPointTag(markerObject);
 
@@ -505,6 +508,7 @@ public class DroneSpawnPointUIManager : MonoBehaviour
             selectedMarkerForMove = null;
         }
 
+        SimulationContext.GetOrCreate(this).UnregisterSpawnPoint(closestMarker);
         Destroy(closestMarker.gameObject);
         RefreshMarkerOrdering();
         return true;
@@ -514,7 +518,7 @@ public class DroneSpawnPointUIManager : MonoBehaviour
     {
         DroneSpawnPointMarker closestMarker = null;
         float bestDistance = maxDistance;
-        DroneSpawnPointMarker[] markers = FindObjectsOfType<DroneSpawnPointMarker>();
+        DroneSpawnPointMarker[] markers = SimulationContext.GetOrCreate(this).GetSpawnPointMarkers();
         for (int i = 0; i < markers.Length; i++)
         {
             DroneSpawnPointMarker marker = markers[i];
@@ -539,7 +543,7 @@ public class DroneSpawnPointUIManager : MonoBehaviour
     private int GetMaxOrderIndex()
     {
         int maxOrder = -1;
-        DroneSpawnPointMarker[] markers = FindObjectsOfType<DroneSpawnPointMarker>();
+        DroneSpawnPointMarker[] markers = SimulationContext.GetOrCreate(this).GetSpawnPointMarkers();
         for (int i = 0; i < markers.Length; i++)
         {
             if (markers[i] != null)
@@ -553,7 +557,8 @@ public class DroneSpawnPointUIManager : MonoBehaviour
 
     private void RefreshMarkerOrdering()
     {
-        List<DroneSpawnPointMarker> markers = new List<DroneSpawnPointMarker>(FindObjectsOfType<DroneSpawnPointMarker>());
+        List<DroneSpawnPointMarker> markers =
+            new List<DroneSpawnPointMarker>(SimulationContext.GetOrCreate(this).GetSpawnPointMarkers());
         markers.Sort((left, right) =>
         {
             int orderCompare = left.orderIndex.CompareTo(right.orderIndex);
@@ -629,7 +634,7 @@ public class DroneSpawnPointUIManager : MonoBehaviour
             return;
         }
 
-        DroneSpawnPointMarker[] markers = FindObjectsOfType<DroneSpawnPointMarker>();
+        DroneSpawnPointMarker[] markers = SimulationContext.GetOrCreate(this).GetSpawnPointMarkers();
         for (int i = 0; i < markers.Length; i++)
         {
             Transform labelTransform = markers[i] != null ? markers[i].transform.Find("Label") : null;
@@ -778,6 +783,22 @@ public class DroneSpawnPointUIManager : MonoBehaviour
     private void OnDisable()
     {
         SetPreviewVisible(false);
+        if (simulationContext != null)
+        {
+            simulationContext.SpawnPointsChanged -= HandleSpawnPointsChanged;
+            simulationContext = null;
+        }
+    }
+
+    private void HandleSpawnPointsChanged()
+    {
+        if (!isActiveAndEnabled)
+        {
+            return;
+        }
+
+        nextOrderIndex = GetMaxOrderIndex() + 1;
+        RefreshMarkerOrdering();
     }
 
     private void OnDestroy()

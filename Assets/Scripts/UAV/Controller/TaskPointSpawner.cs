@@ -53,6 +53,7 @@ public class TaskPointSpawner : MonoBehaviour
             taskPoint.taskId = currentId;
             taskPoint.taskName = $"巡检点 {currentId}";
             currentId++;
+            SimulationContext.GetOrCreate(this).RegisterTaskPoint(taskPoint);
         }
 
         Debug.Log($"[TaskPointSpawner] 创建任务点: {go.name} at {finalPosition}");
@@ -70,15 +71,23 @@ public class TaskPointSpawner : MonoBehaviour
 
     public void ClearAll()
     {
+        SimulationContext context = SimulationContext.GetOrCreate(this);
+
         if (parentContainer != null)
         {
             foreach (Transform child in parentContainer)
             {
+                TaskPoint taskPoint = child != null ? child.GetComponent<TaskPoint>() : null;
+                if (taskPoint != null)
+                {
+                    context.UnregisterTaskPoint(taskPoint, false);
+                }
+
                 Destroy(child.gameObject);
             }
         }
 
-        TaskPoint[] allTaskPoints = FindObjectsOfType<TaskPoint>();
+        TaskPoint[] allTaskPoints = context.GetTaskPoints();
         int cleared = 0;
         foreach (TaskPoint taskPoint in allTaskPoints)
         {
@@ -87,10 +96,12 @@ public class TaskPointSpawner : MonoBehaviour
                 continue;
             }
 
+            context.UnregisterTaskPoint(taskPoint, false);
             Destroy(taskPoint.gameObject);
             cleared++;
         }
 
+        context.NotifyTasksChanged();
         Debug.Log($"[TaskPointSpawner] 已清除 {cleared} 个任务点");
     }
 

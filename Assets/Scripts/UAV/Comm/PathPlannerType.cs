@@ -5,5 +5,6 @@ public enum PathPlannerType
 {
     StraightLine = 0,
     AStar = 1,
-    RRT = 2
+    RRT = 2,
+    QLearningOffline = 3
 }

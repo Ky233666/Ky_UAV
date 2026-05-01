@@ -12,6 +12,8 @@ public class TaskManager : MonoBehaviour
     [Header("任务点列表")]
     public List<TaskPoint> allTasks = new List<TaskPoint>();
 
+    private SimulationContext simulationContext;
+
     void Awake()
     {
         if (Instance != null && Instance != this)
@@ -24,11 +26,31 @@ public class TaskManager : MonoBehaviour
 
     void Start()
     {
-        var foundTasks = FindObjectsOfType<TaskPoint>();
-        allTasks = foundTasks.ToList();
-        allTasks = allTasks.OrderByDescending(t => t.priority).ToList();
+        simulationContext = SimulationContext.GetOrCreate(this);
+        simulationContext.TasksChanged += RefreshTasks;
+        RefreshTasks();
 
         Debug.Log($"[TaskManager] 发现 {allTasks.Count} 个任务点");
+    }
+
+    private void OnDisable()
+    {
+        if (simulationContext != null)
+        {
+            simulationContext.TasksChanged -= RefreshTasks;
+            simulationContext = null;
+        }
+    }
+
+    private void RefreshTasks()
+    {
+        SimulationContext context = simulationContext != null
+            ? simulationContext
+            : SimulationContext.GetOrCreate(this);
+        allTasks = context.GetTaskPoints()
+            .Where(task => task != null)
+            .OrderByDescending(task => task.priority)
+            .ToList();
     }
 
     /// <summary>

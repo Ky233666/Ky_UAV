@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+.idea/
+
+input/*
+!input/.gitkeep
+
+output/*
+!output/.gitkeep
+
+cases/*
+!cases/.gitkeep

@@ -62,9 +62,56 @@
 
 ## 构建与验证
 
-- 烟雾验证：`Tools/KY UAV/Run Project Smoke Validation`
-- Windows 打包：`Tools/KY UAV/Build Windows Player`
-- EditMode 批处理入口：`KyUavEditModeBatchRunner.RunEditModeTests`
+### 编辑器路径
+
+项目锁定 Unity `2022.3.62f3`，版本记录在 `ProjectSettings/ProjectVersion.txt`。当前开发机验证过的编辑器路径为：
+
+```powershell
+D:\unityhub\Unity Hub\Editor\2022.3.62f3\Editor\Unity.exe
+```
+
+如果本机安装路径不同，在 Unity Hub 的 Installs 页面确认 `2022.3.62f3` 所在目录，并把下面命令中的 `$Unity` 替换为实际 `Unity.exe` 路径。
+
+### PowerShell 验证命令
+
+```powershell
+$Project = "D:\unityhub\project\Ky_UAV"
+$Unity = "D:\unityhub\Unity Hub\Editor\2022.3.62f3\Editor\Unity.exe"
+```
+
+运行编辑器烟雾验证：
+
+```powershell
+& $Unity -batchmode -quit -projectPath $Project -executeMethod ProjectSmokeValidator.RunSmokeValidation -logFile "$Project\Logs\smoke-validation.log"
+```
+
+运行 EditMode 自动化测试：
+
+```powershell
+& $Unity -batchmode -quit -projectPath $Project -executeMethod KyUavEditModeBatchRunner.RunEditModeTests -logFile "$Project\Logs\editmode-batch.log"
+```
+
+运行 PlayMode 主流程验证：
+
+```powershell
+& $Unity -batchmode -projectPath $Project -runTests -testPlatform PlayMode -testResults "$Project\Library\Logs\playmode-results.xml" -logFile "$Project\Logs\playmode-batch.log"
+```
+
+测试结果写入：
+
+```powershell
+Library\Logs\editmode-results.xml
+Library\Logs\playmode-results.xml
+```
+
+使用 Visual Studio 2022 MSBuild 编译脚本工程：
+
+```powershell
+& "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" Ky_UAV.sln /nologo /v:minimal
+```
+
+- Windows 打包菜单入口：`Tools/KY UAV/Build Windows Player`
+- 批处理打包入口：`KyUavBuildTools.BuildWindowsPlayerBatch`
 - 默认打包输出目录：`D:\unityhub\project\build\Ky_UAV`
 
 ## 文档入口

@@ -49,10 +49,13 @@ public class PathPlanningProcessRenderer : MonoBehaviour
         pulsingCurrentMarker.transform.localScale = Vector3.one * highlightedNodeScale * pulse;
     }
 
-    public void SetProjectionMode(bool enabled, float projectionHeight)
+    public bool SetProjectionMode(bool enabled, float projectionHeight)
     {
+        bool changed = useTopDownProjection != enabled ||
+                       !Mathf.Approximately(topDownProjectionHeight, projectionHeight);
         useTopDownProjection = enabled;
         topDownProjectionHeight = projectionHeight;
+        return changed;
     }
 
     public void ClearVisualization()
@@ -252,7 +255,7 @@ public class PathPlanningProcessRenderer : MonoBehaviour
             Renderer renderer = marker.GetComponent<Renderer>();
             if (renderer != null)
             {
-                renderer.material.color = ResolveNodeColor(role, accentColor);
+                renderer.sharedMaterial.color = ResolveNodeColor(role, accentColor);
             }
 
             if (role == PathPlanningVisualizationNodeRole.Current)
@@ -314,7 +317,7 @@ public class PathPlanningProcessRenderer : MonoBehaviour
             Collider collider = marker.GetComponent<Collider>();
             if (collider != null)
             {
-                Destroy(collider);
+                DestroyUnityObject(collider);
             }
 
             Renderer renderer = marker.GetComponent<Renderer>();
@@ -322,7 +325,7 @@ public class PathPlanningProcessRenderer : MonoBehaviour
             {
                 renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 renderer.receiveShadows = false;
-                renderer.material = CreateUnlitMaterial();
+                renderer.sharedMaterial = CreateUnlitMaterial();
             }
 
             pool.Add(marker);
@@ -507,5 +510,22 @@ public class PathPlanningProcessRenderer : MonoBehaviour
         }
 
         return new Material(shader);
+    }
+
+    private static void DestroyUnityObject(Object target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            Destroy(target);
+        }
+        else
+        {
+            DestroyImmediate(target);
+        }
     }
 }

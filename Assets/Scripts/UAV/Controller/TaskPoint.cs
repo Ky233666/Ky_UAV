@@ -65,6 +65,20 @@ public class TaskPoint : MonoBehaviour
             markerRenderer = marker.GetComponent<Renderer>();
     }
 
+    private void OnEnable()
+    {
+        SimulationContext.GetOrCreate(this).RegisterTaskPoint(this);
+    }
+
+    private void OnDestroy()
+    {
+        SimulationContext context = SimulationContext.Current;
+        if (context != null)
+        {
+            context.UnregisterTaskPoint(this);
+        }
+    }
+
     void Start()
     {
         UpdateVisualState();
@@ -82,6 +96,7 @@ public class TaskPoint : MonoBehaviour
         startTime = Time.time;
 
         UpdateVisualState();
+        SimulationContext.Current?.NotifyTasksChanged();
         Debug.Log($"[TaskPoint] {taskName} 开始执行，分配给无人机");
     }
 
@@ -97,6 +112,7 @@ public class TaskPoint : MonoBehaviour
         assignedDrone = null;
 
         UpdateVisualState();
+        SimulationContext.Current?.NotifyTasksChanged();
         Debug.Log($"[TaskPoint] {taskName} 已完成，耗时 {completionTime:F1} 秒");
     }
 
@@ -111,6 +127,7 @@ public class TaskPoint : MonoBehaviour
         completionTime = 0;
 
         UpdateVisualState();
+        SimulationContext.Current?.NotifyTasksChanged();
     }
 
     /// <summary>

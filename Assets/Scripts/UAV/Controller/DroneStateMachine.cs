@@ -116,8 +116,8 @@ public class DroneStateMachine : MonoBehaviour
             return;
 
         Vector3 frameStartPosition = droneController != null
-            ? droneController.transform.position
-            : transform.position;
+            ? ToCruisePosition(droneController.transform.position)
+            : ToCruisePosition(transform.position);
 
         // 触发状态更新事件
         OnStateUpdate?.Invoke(currentState);
@@ -239,11 +239,16 @@ public class DroneStateMachine : MonoBehaviour
         if (droneController == null)
             return;
 
+        EnforceCruiseHeight();
+
         if (!TryGetActiveTargetPosition(out Vector3 targetPos))
             return;
 
+        targetPos = ToCruisePosition(targetPos);
+
         // 计算方向和距离
         Vector3 direction = targetPos - droneController.transform.position;
+        direction.y = 0f;
         float distance = direction.magnitude;
 
         // 到达判定
@@ -320,6 +325,7 @@ public class DroneStateMachine : MonoBehaviour
         ClearActiveConflict();
 
         droneController.transform.position += direction * safeStep;
+        EnforceCruiseHeight();
     }
 
     /// <summary>
@@ -493,7 +499,7 @@ public class DroneStateMachine : MonoBehaviour
             if (pathResult.HasPath())
             {
                 droneData.currentWaypointIndex = pathResult.waypoints.Count > 1 ? 1 : 0;
-                droneController.SetTargetPosition(pathResult.waypoints[droneData.currentWaypointIndex]);
+                droneController.SetTargetPosition(ToCruisePosition(pathResult.waypoints[droneData.currentWaypointIndex]));
                 droneController.hasArrived = false;
                 return true;
             }
@@ -501,7 +507,7 @@ public class DroneStateMachine : MonoBehaviour
 
         droneData.plannedPath.Clear();
         droneData.currentWaypointIndex = 0;
-        droneController.SetTarget(currentTask.transform);
+        droneController.SetTargetPosition(ToCruisePosition(currentTask.transform.position));
         droneController.hasArrived = false;
         return false;
     }
@@ -542,11 +548,17 @@ public class DroneStateMachine : MonoBehaviour
             droneData.currentWaypointIndex >= 0 &&
             droneData.currentWaypointIndex < droneData.plannedPath.Count)
         {
-            targetPosition = droneData.plannedPath[droneData.currentWaypointIndex];
+            targetPosition = ToCruisePosition(droneData.plannedPath[droneData.currentWaypointIndex]);
             return true;
         }
 
-        return droneController.TryGetCurrentTargetPosition(out targetPosition);
+        if (droneController.TryGetCurrentTargetPosition(out targetPosition))
+        {
+            targetPosition = ToCruisePosition(targetPosition);
+            return true;
+        }
+
+        return false;
     }
 
     private bool TryAdvanceToNextWaypoint()
@@ -562,7 +574,7 @@ public class DroneStateMachine : MonoBehaviour
         }
 
         droneData.currentWaypointIndex++;
-        droneController.SetTargetPosition(droneData.plannedPath[droneData.currentWaypointIndex]);
+        droneController.SetTargetPosition(ToCruisePosition(droneData.plannedPath[droneData.currentWaypointIndex]));
         return true;
     }
 
@@ -573,13 +585,14 @@ public class DroneStateMachine : MonoBehaviour
             return;
         }
 
-        float deltaDistance = Vector3.Distance(frameStartPosition, droneController.transform.position);
+        Vector3 currentPosition = ToCruisePosition(droneController.transform.position);
+        float deltaDistance = Vector3.Distance(frameStartPosition, currentPosition);
         if (deltaDistance > 0.0001f)
         {
             droneData.totalFlightDistance += deltaDistance;
         }
 
-        droneData.lastKnownPosition = droneController.transform.position;
+        droneData.lastKnownPosition = currentPosition;
     }
 
     private float ComputeSafeMovementStep(
@@ -679,6 +692,7 @@ public class DroneStateMachine : MonoBehaviour
                 TryGetActiveTargetPosition(out Vector3 replannedTarget))
             {
                 Vector3 replannedDirection = replannedTarget - droneController.transform.position;
+                replannedDirection.y = 0f;
                 if (replannedDirection.sqrMagnitude > 0.0001f)
                 {
                     replannedDirection.Normalize();
@@ -713,6 +727,7 @@ public class DroneStateMachine : MonoBehaviour
         }
 
         Vector3 retreatDirection = droneController.transform.position - nearbyDrone.transform.position;
+        retreatDirection.y = 0f;
         if (retreatDirection.sqrMagnitude <= 0.0001f)
         {
             retreatDirection = Vector3.right;
@@ -720,6 +735,7 @@ public class DroneStateMachine : MonoBehaviour
 
         retreatDirection.Normalize();
         droneController.transform.position += retreatDirection * avoidanceRetreatSpeed * Time.deltaTime;
+        EnforceCruiseHeight();
     }
 
     private bool TryFindNearestDroneWithinDistance(float distanceThreshold, out DroneController nearbyDrone)
@@ -878,6 +894,7 @@ public class DroneStateMachine : MonoBehaviour
         }
 
         Vector3 direction = targetPosition - controller.transform.position;
+        direction.y = 0f;
         return direction.sqrMagnitude <= 0.0001f ? Vector3.zero : direction.normalized;
     }
 
@@ -908,6 +925,23 @@ public class DroneStateMachine : MonoBehaviour
         activeConflictKey = normalizedKey;
         droneData.conflictCount++;
         droneData.lastConflictReason = reason ?? string.Empty;
+    }
+
+    private Vector3 ToCruisePosition(Vector3 position)
+    {
+        return DroneManager.Instance != null
+            ? DroneManager.Instance.ToCruisePosition(position)
+            : position;
+    }
+
+    private void EnforceCruiseHeight()
+    {
+        if (droneController == null || DroneManager.Instance == null)
+        {
+            return;
+        }
+
+        droneController.transform.position = DroneManager.Instance.ToCruisePosition(droneController.transform.position);
     }
 
     private void ClearActiveConflict()

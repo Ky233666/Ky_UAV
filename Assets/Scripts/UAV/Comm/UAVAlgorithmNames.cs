@@ -21,6 +21,8 @@ public static class UAVAlgorithmNames
     {
         switch (plannerType)
         {
+            case PathPlannerType.QLearningOffline:
+                return "QLearningOffline";
             case PathPlannerType.RRT:
                 return "RRT";
             case PathPlannerType.AStar:
@@ -49,6 +51,8 @@ public static class UAVAlgorithmNames
     {
         switch (plannerType)
         {
+            case PathPlannerType.QLearningOffline:
+                return "Q-learning";
             case PathPlannerType.RRT:
                 return "RRT";
             case PathPlannerType.AStar:

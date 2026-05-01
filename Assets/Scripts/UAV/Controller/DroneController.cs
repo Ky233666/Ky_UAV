@@ -89,7 +89,7 @@ public class DroneController : MonoBehaviour
     public void SetTargetPosition(Vector3 position)
     {
         targetPoint = null;
-        virtualTargetPosition = position;
+        virtualTargetPosition = ResolveCruisePosition(position);
         hasVirtualTargetPosition = true;
         hasArrived = false;
     }
@@ -106,7 +106,7 @@ public class DroneController : MonoBehaviour
     public void ResetToInitial()
     {
         StopPhysicsMotion();
-        transform.position = initialPosition;
+        transform.position = ResolveCruisePosition(initialPosition);
         transform.rotation = initialRotation;
         targetPoint = null;
         hasVirtualTargetPosition = false;
@@ -145,6 +145,7 @@ public class DroneController : MonoBehaviour
         }
 
         // === 以下为无状态机时的兼容逻辑 ===
+        transform.position = ResolveCruisePosition(transform.position);
 
         // 没有目标点或已到达则不移动
         if (!TryGetCurrentTargetPosition(out Vector3 targetPosition) || hasArrived)
@@ -152,6 +153,7 @@ public class DroneController : MonoBehaviour
 
         // 计算方向和距离
         Vector3 direction = targetPosition - transform.position;
+        direction.y = 0f;
         float distance = direction.magnitude;
 
         // 到达判定
@@ -167,6 +169,7 @@ public class DroneController : MonoBehaviour
 
         // 只移动位置，不旋转（避免翻滚）
         transform.position += direction * speed * Time.deltaTime;
+        transform.position = ResolveCruisePosition(transform.position);
     }
 
     private void ConfigurePhysicsBody()
@@ -204,18 +207,25 @@ public class DroneController : MonoBehaviour
     {
         if (targetPoint != null)
         {
-            targetPosition = targetPoint.position;
+            targetPosition = ResolveCruisePosition(targetPoint.position);
             return true;
         }
 
         if (hasVirtualTargetPosition)
         {
-            targetPosition = virtualTargetPosition;
+            targetPosition = ResolveCruisePosition(virtualTargetPosition);
             return true;
         }
 
         targetPosition = Vector3.zero;
         return false;
+    }
+
+    private Vector3 ResolveCruisePosition(Vector3 position)
+    {
+        return DroneManager.Instance != null
+            ? DroneManager.Instance.ToCruisePosition(position)
+            : position;
     }
 
     void OnDrawGizmosSelected()

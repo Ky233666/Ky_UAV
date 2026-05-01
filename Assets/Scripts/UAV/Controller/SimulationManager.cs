@@ -30,6 +30,26 @@ public class SimulationManager : MonoBehaviour
     [Tooltip("算法过程可视化管理器")]
     public AlgorithmVisualizerManager algorithmVisualizerManager;
 
+    [Header("调度结果可视化")]
+    [Tooltip("任务队列可视化管理器")]
+    public TaskQueueVisualizer taskQueueVisualizer;
+
+    [Header("强化学习路径规划")]
+    [Tooltip("Q-learning 离线路径规划地图导出器")]
+    public RLMapExporter rlMapExporter;
+
+    [Tooltip("Q-learning 离线路径结果读取器")]
+    public RLPathResultImporter rlPathResultImporter;
+
+    [Tooltip("Q-learning 训练地图边界显示器")]
+    public RLTrainingMapBoundsVisualizer rlTrainingMapBoundsVisualizer;
+
+    [Tooltip("Q-learning 训练场景运行时初始化器")]
+    public RLTrainingSceneBootstrap rlTrainingSceneBootstrap;
+
+    [Tooltip("Q-learning Python 后台训练执行器")]
+    public RLQlearningTrainingRunner rlTrainingRunner;
+
     [Header("任务设置")]
     [Tooltip("当场景中没有任务点时，自动尝试从 Resources 导入默认任务点")]
     public bool autoImportTasksWhenMissing = true;
@@ -67,6 +87,8 @@ public class SimulationManager : MonoBehaviour
             return;
         }
         Instance = this;
+        RuntimeSceneRegistry.Register(this);
+        SimulationContext.GetOrCreate(this);
     }
 
     void Start()
@@ -146,13 +168,14 @@ public class SimulationManager : MonoBehaviour
 
     private TaskPoint[] GetAvailableTasks()
     {
-        TaskPoint[] allTasks = FindObjectsOfType<TaskPoint>();
+        SimulationContext context = SimulationContext.GetOrCreate(this);
+        TaskPoint[] allTasks = context.GetTaskPoints();
         if (allTasks.Length > 0 || !autoImportTasksWhenMissing)
         {
             return allTasks;
         }
 
-        TaskPointImporter importer = FindObjectOfType<TaskPointImporter>();
+        TaskPointImporter importer = RuntimeSceneRegistry.Get<TaskPointImporter>(this);
         if (importer == null)
         {
             Debug.LogWarning("[SimulationManager] 未找到 TaskPointImporter，无法自动导入默认任务点");
@@ -160,7 +183,7 @@ public class SimulationManager : MonoBehaviour
         }
 
         importer.ImportFromResources();
-        allTasks = FindObjectsOfType<TaskPoint>();
+        allTasks = context.GetTaskPoints();
 
         if (allTasks.Length > 0)
         {
@@ -234,7 +257,8 @@ public class SimulationManager : MonoBehaviour
         // 兼容旧场景：单个无人机
         else if (droneController != null)
         {
-            var firstTask = FindObjectOfType<TaskPoint>();
+            TaskPoint[] availableTasks = SimulationContext.GetOrCreate(this).GetTaskPoints();
+            var firstTask = availableTasks.Length > 0 ? availableTasks[0] : null;
             if (firstTask != null)
             {
                 droneController.SetTarget(firstTask.transform);
@@ -296,23 +320,36 @@ public class SimulationManager : MonoBehaviour
 
     private void EnsureRuntimeControlPanel()
     {
-        SimulationRuntimeControlPanel runtimeControlPanel = FindObjectOfType<SimulationRuntimeControlPanel>();
+        SimulationRuntimeControlPanel runtimeControlPanel = RuntimeSceneRegistry.Get<SimulationRuntimeControlPanel>(this);
         if (runtimeControlPanel == null)
         {
             runtimeControlPanel = gameObject.AddComponent<SimulationRuntimeControlPanel>();
         }
+        RuntimeSceneRegistry.Register(runtimeControlPanel);
 
-        DroneSpawnPointUIManager spawnPointManager = FindObjectOfType<DroneSpawnPointUIManager>();
+        DroneSpawnPointUIManager spawnPointManager = RuntimeSceneRegistry.Get<DroneSpawnPointUIManager>(this);
         if (spawnPointManager == null)
         {
             spawnPointManager = gameObject.AddComponent<DroneSpawnPointUIManager>();
         }
+        RuntimeSceneRegistry.Register(spawnPointManager);
 
-        RuntimeObstacleEditor obstacleEditor = FindObjectOfType<RuntimeObstacleEditor>();
+        RuntimeObstacleEditor obstacleEditor = RuntimeSceneRegistry.Get<RuntimeObstacleEditor>(this);
         if (obstacleEditor == null)
         {
             obstacleEditor = gameObject.AddComponent<RuntimeObstacleEditor>();
         }
+        RuntimeSceneRegistry.Register(obstacleEditor);
+
+        if (taskQueueVisualizer == null)
+        {
+            taskQueueVisualizer = GetComponent<TaskQueueVisualizer>();
+            if (taskQueueVisualizer == null)
+            {
+                taskQueueVisualizer = gameObject.AddComponent<TaskQueueVisualizer>();
+            }
+        }
+        RuntimeSceneRegistry.Register(taskQueueVisualizer);
 
         if (algorithmVisualizerManager == null)
         {
@@ -322,6 +359,7 @@ public class SimulationManager : MonoBehaviour
                 algorithmVisualizerManager = gameObject.AddComponent<AlgorithmVisualizerManager>();
             }
         }
+        RuntimeSceneRegistry.Register(algorithmVisualizerManager);
 
         runtimeControlPanel.simulationManager = this;
         if (runtimeControlPanel.droneManager == null)
@@ -331,6 +369,7 @@ public class SimulationManager : MonoBehaviour
         runtimeControlPanel.spawnPointManager = spawnPointManager;
         runtimeControlPanel.obstacleEditor = obstacleEditor;
         runtimeControlPanel.algorithmVisualizerManager = algorithmVisualizerManager;
+        runtimeControlPanel.taskQueueVisualizer = taskQueueVisualizer;
 
         if (resultExporter == null)
         {
@@ -340,6 +379,7 @@ public class SimulationManager : MonoBehaviour
                 resultExporter = gameObject.AddComponent<SimulationResultExporter>();
             }
         }
+        RuntimeSceneRegistry.Register(resultExporter);
 
         resultExporter.simulationManager = this;
         if (resultExporter.droneManager == null)
@@ -355,9 +395,85 @@ public class SimulationManager : MonoBehaviour
                 batchExperimentRunner = gameObject.AddComponent<BatchExperimentRunner>();
             }
         }
+        RuntimeSceneRegistry.Register(batchExperimentRunner);
 
         batchExperimentRunner.simulationManager = this;
         batchExperimentRunner.resultExporter = resultExporter;
+
+        if (rlMapExporter == null)
+        {
+            rlMapExporter = GetComponent<RLMapExporter>();
+            if (rlMapExporter == null)
+            {
+                rlMapExporter = gameObject.AddComponent<RLMapExporter>();
+            }
+        }
+        RuntimeSceneRegistry.Register(rlMapExporter);
+        if (rlMapExporter.droneManager == null)
+        {
+            rlMapExporter.droneManager = droneManager;
+        }
+
+        if (rlPathResultImporter == null)
+        {
+            rlPathResultImporter = GetComponent<RLPathResultImporter>();
+            if (rlPathResultImporter == null)
+            {
+                rlPathResultImporter = gameObject.AddComponent<RLPathResultImporter>();
+            }
+        }
+        RuntimeSceneRegistry.Register(rlPathResultImporter);
+        if (rlPathResultImporter.droneManager == null)
+        {
+            rlPathResultImporter.droneManager = droneManager;
+        }
+
+        if (rlTrainingMapBoundsVisualizer == null)
+        {
+            rlTrainingMapBoundsVisualizer = GetComponent<RLTrainingMapBoundsVisualizer>();
+            if (rlTrainingMapBoundsVisualizer == null)
+            {
+                rlTrainingMapBoundsVisualizer = gameObject.AddComponent<RLTrainingMapBoundsVisualizer>();
+            }
+        }
+        RuntimeSceneRegistry.Register(rlTrainingMapBoundsVisualizer);
+        if (rlTrainingMapBoundsVisualizer.droneManager == null)
+        {
+            rlTrainingMapBoundsVisualizer.droneManager = droneManager;
+        }
+
+        if (rlTrainingSceneBootstrap == null)
+        {
+            rlTrainingSceneBootstrap = GetComponent<RLTrainingSceneBootstrap>();
+            if (rlTrainingSceneBootstrap == null)
+            {
+                rlTrainingSceneBootstrap = gameObject.AddComponent<RLTrainingSceneBootstrap>();
+            }
+        }
+        RuntimeSceneRegistry.Register(rlTrainingSceneBootstrap);
+        rlTrainingSceneBootstrap.simulationManager = this;
+        if (rlTrainingSceneBootstrap.droneManager == null)
+        {
+            rlTrainingSceneBootstrap.droneManager = droneManager;
+        }
+        if (rlTrainingSceneBootstrap.cameraManager == null)
+        {
+            rlTrainingSceneBootstrap.cameraManager = RuntimeSceneRegistry.Get<CameraManager>(this);
+        }
+
+        if (rlTrainingRunner == null)
+        {
+            rlTrainingRunner = GetComponent<RLQlearningTrainingRunner>();
+            if (rlTrainingRunner == null)
+            {
+                rlTrainingRunner = gameObject.AddComponent<RLQlearningTrainingRunner>();
+            }
+        }
+        RuntimeSceneRegistry.Register(rlTrainingRunner);
+
+        runtimeControlPanel.rlMapExporter = rlMapExporter;
+        runtimeControlPanel.rlPathResultImporter = rlPathResultImporter;
+        runtimeControlPanel.rlTrainingRunner = rlTrainingRunner;
 
         spawnPointManager.simulationManager = this;
         if (spawnPointManager.droneManager == null)
@@ -372,11 +488,21 @@ public class SimulationManager : MonoBehaviour
         }
         if (obstacleEditor.cameraManager == null)
         {
-            obstacleEditor.cameraManager = FindObjectOfType<CameraManager>();
+            obstacleEditor.cameraManager = RuntimeSceneRegistry.Get<CameraManager>(this);
         }
 
         runtimeControlPanel.resultExporter = resultExporter;
         runtimeControlPanel.batchExperimentRunner = batchExperimentRunner;
+
+        taskQueueVisualizer.simulationManager = this;
+        if (taskQueueVisualizer.droneManager == null)
+        {
+            taskQueueVisualizer.droneManager = droneManager;
+        }
+        if (taskQueueVisualizer.cameraManager == null)
+        {
+            taskQueueVisualizer.cameraManager = RuntimeSceneRegistry.Get<CameraManager>(this);
+        }
 
         algorithmVisualizerManager.simulationManager = this;
         if (algorithmVisualizerManager.droneManager == null)
@@ -385,13 +511,13 @@ public class SimulationManager : MonoBehaviour
         }
         if (algorithmVisualizerManager.cameraManager == null)
         {
-            algorithmVisualizerManager.cameraManager = FindObjectOfType<CameraManager>();
+            algorithmVisualizerManager.cameraManager = RuntimeSceneRegistry.Get<CameraManager>(this);
         }
     }
 
     private void ResetAllTaskPointsInScene()
     {
-        TaskPoint[] allTasks = FindObjectsOfType<TaskPoint>();
+        TaskPoint[] allTasks = SimulationContext.GetOrCreate(this).GetTaskPoints();
         foreach (TaskPoint taskPoint in allTasks)
         {
             if (taskPoint != null)

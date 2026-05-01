@@ -408,28 +408,12 @@ public class SimulationResultExporter : MonoBehaviour
 
     private void CacheReferences()
     {
-        if (simulationManager == null)
-        {
-            simulationManager = GetComponent<SimulationManager>();
-            if (simulationManager == null)
-            {
-                simulationManager = FindObjectOfType<SimulationManager>();
-            }
-        }
-
-        if (droneManager == null)
-        {
-            droneManager = simulationManager != null ? simulationManager.droneManager : null;
-            if (droneManager == null)
-            {
-                droneManager = FindObjectOfType<DroneManager>();
-            }
-        }
-
-        if (cameraManager == null)
-        {
-            cameraManager = FindObjectOfType<CameraManager>();
-        }
+        simulationManager = RuntimeSceneRegistry.Resolve(simulationManager, this);
+        droneManager = RuntimeSceneRegistry.Resolve(
+            droneManager,
+            simulationManager != null ? simulationManager.droneManager : null,
+            this);
+        cameraManager = RuntimeSceneRegistry.Resolve(cameraManager, this);
     }
 
     private bool IsRunCompleted()
@@ -439,7 +423,7 @@ public class SimulationResultExporter : MonoBehaviour
             return false;
         }
 
-        TaskPoint[] taskPoints = FindObjectsOfType<TaskPoint>();
+        TaskPoint[] taskPoints = SimulationContext.GetOrCreate(this).GetTaskPoints();
         if (taskPoints.Length == 0)
         {
             return false;
@@ -464,7 +448,7 @@ public class SimulationResultExporter : MonoBehaviour
             return null;
         }
 
-        TaskPoint[] taskPoints = FindObjectsOfType<TaskPoint>();
+        TaskPoint[] taskPoints = SimulationContext.GetOrCreate(this).GetTaskPoints();
 
         SimulationExperimentRecord record = new SimulationExperimentRecord
         {
@@ -504,7 +488,7 @@ public class SimulationResultExporter : MonoBehaviour
             return null;
         }
 
-        TaskPoint[] taskPoints = FindObjectsOfType<TaskPoint>();
+        TaskPoint[] taskPoints = SimulationContext.GetOrCreate(this).GetTaskPoints();
         SimulationExperimentDetailExport detail = new SimulationExperimentDetailExport
         {
             experimentTime = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
