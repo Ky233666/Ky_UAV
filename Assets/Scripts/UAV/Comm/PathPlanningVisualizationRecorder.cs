@@ -90,6 +90,8 @@ public sealed class PathPlanningVisualizationRecorder
             worldMin = source.worldMin,
             worldMax = source.worldMax,
             obstacleLayer = source.obstacleLayer,
+            planningMap = source.planningMap,
+            obstacleSafetyPadding = source.obstacleSafetyPadding,
             allowDiagonal = source.allowDiagonal
         };
     }

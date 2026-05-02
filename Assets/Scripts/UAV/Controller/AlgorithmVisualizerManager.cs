@@ -32,6 +32,9 @@ public class AlgorithmVisualizerManager : MonoBehaviour
     public bool autoSelectLatestTrace = true;
     public bool autoplayOnNewTrace = false;
     public float baseSecondsPerStep = 0.18f;
+    public bool capturePlanningTraces = true;
+    public bool recordAllDroneTraces = false;
+    public int maxRecordedStepsPerTrace = 2000;
 
     [Header("Visibility Aid")]
     public bool obstacleTransparencyEnabled = true;
@@ -125,6 +128,11 @@ public class AlgorithmVisualizerManager : MonoBehaviour
         string droneName,
         PathPlanningRequest request)
     {
+        if (!ShouldCapturePlanningTrace(droneId))
+        {
+            return null;
+        }
+
         Color accent = ResolveDroneAccentColor(droneId);
         return new PathPlanningVisualizationRecorder(
             droneId,
@@ -133,7 +141,28 @@ public class AlgorithmVisualizerManager : MonoBehaviour
             UAVAlgorithmNames.GetPlannerIdentifier(plannerType),
             UAVAlgorithmNames.GetPlannerDisplayName(plannerType),
             accent,
-            request);
+            request,
+            maxRecordedStepsPerTrace);
+    }
+
+    public bool ShouldCapturePlanningTrace(int droneId)
+    {
+        if (!capturePlanningTraces)
+        {
+            return false;
+        }
+
+        if (recordAllDroneTraces)
+        {
+            return true;
+        }
+
+        if (selectedDroneId >= 0)
+        {
+            return selectedDroneId == droneId || !HasPlayableTrace();
+        }
+
+        return tracesByDroneId.Count == 0;
     }
 
     public void RegisterPlanningTrace(PathPlanningVisualizationTrace trace)

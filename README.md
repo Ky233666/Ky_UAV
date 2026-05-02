@@ -123,6 +123,7 @@ Library\Logs\playmode-results.xml
 - [功能说明](docs/feature-specification.md)
 - [系统架构](docs/system-architecture.md)
 - [模块设计](docs/module-design.md)
+- [路径规划地图与边界可视化说明](docs/path-planning-map-visualization.md)
 - [用户指南](docs/user-guide.md)
 - [部署与构建](docs/deployment-guide.md)
 - [测试与实验](docs/testing-and-evaluation.md)

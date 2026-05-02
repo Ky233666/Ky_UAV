@@ -34,6 +34,9 @@ public class SimulationManager : MonoBehaviour
     [Tooltip("任务队列可视化管理器")]
     public TaskQueueVisualizer taskQueueVisualizer;
 
+    [Tooltip("路径规划地图边界与占用格子预览器")]
+    public PlanningMapVisualizer planningMapVisualizer;
+
     [Header("强化学习路径规划")]
     [Tooltip("Q-learning 离线路径规划地图导出器")]
     public RLMapExporter rlMapExporter;
@@ -361,6 +364,20 @@ public class SimulationManager : MonoBehaviour
         }
         RuntimeSceneRegistry.Register(algorithmVisualizerManager);
 
+        if (planningMapVisualizer == null)
+        {
+            planningMapVisualizer = GetComponent<PlanningMapVisualizer>();
+            if (planningMapVisualizer == null)
+            {
+                planningMapVisualizer = gameObject.AddComponent<PlanningMapVisualizer>();
+            }
+        }
+        RuntimeSceneRegistry.Register(planningMapVisualizer);
+        if (planningMapVisualizer.droneManager == null)
+        {
+            planningMapVisualizer.droneManager = droneManager;
+        }
+
         runtimeControlPanel.simulationManager = this;
         if (runtimeControlPanel.droneManager == null)
         {
@@ -370,6 +387,7 @@ public class SimulationManager : MonoBehaviour
         runtimeControlPanel.obstacleEditor = obstacleEditor;
         runtimeControlPanel.algorithmVisualizerManager = algorithmVisualizerManager;
         runtimeControlPanel.taskQueueVisualizer = taskQueueVisualizer;
+        runtimeControlPanel.planningMapVisualizer = planningMapVisualizer;
 
         if (resultExporter == null)
         {

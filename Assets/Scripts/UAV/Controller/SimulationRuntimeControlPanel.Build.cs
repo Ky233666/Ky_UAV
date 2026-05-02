@@ -292,6 +292,12 @@ public partial class SimulationRuntimeControlPanel
         CreateStepperRow(algorithmSection, "检测高", out planningMaxYValueText, OnDecreasePlanningMaxYClicked, OnIncreasePlanningMaxYClicked);
         CreateToggleRow(algorithmSection, "对角搜索", out diagonalPlanningToggleButton, ToggleDiagonalPlanning);
         CreateToggleRow(algorithmSection, "障碍自动", out obstacleAutoConfigToggleButton, ToggleObstacleAutoConfiguration);
+        CreateButtonStripRow(algorithmSection, "规划地图", new[]
+        {
+            new ButtonAction("适配边界", PrimaryButtonColor, FitPlanningBoundsToScene, 78f),
+            new ButtonAction("边界", new Color(0.10f, 0.48f, 0.62f, 0.98f), TogglePlanningBoundsPreview, 56f),
+            new ButtonAction("障碍格", SecondaryButtonColor, TogglePlanningBlockedCellPreview, 64f)
+        });
         CreateStepperRow(algorithmSection, "RL案例", out rlCaseValueText, OnPreviousRLCaseClicked, OnNextRLCaseClicked, 176f);
         CreateButtonStripRow(algorithmSection, "RL地图", new[]
         {

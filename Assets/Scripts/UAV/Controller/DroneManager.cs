@@ -13,6 +13,9 @@ public class DroneManager : MonoBehaviour
     private float pathProjectionHeight = 12f;
     private readonly List<Bounds> obstacleFootprintBounds = new List<Bounds>();
     private bool obstacleFootprintCacheInitialized;
+    private PlanningGridMap cachedPlanningMap;
+    private bool planningMapDirty = true;
+    private string cachedPlanningMapSignature = string.Empty;
     private AlgorithmVisualizerManager algorithmVisualizerManager;
     private SimulationContext simulationContext;
 
@@ -110,6 +113,21 @@ public class DroneManager : MonoBehaviour
     [Tooltip("自动生成障碍代理碰撞体时的最小尺寸")]
     public Vector3 minimumObstacleColliderSize = new Vector3(2f, 2f, 2f);
 
+    [Tooltip("路径规划时围绕建筑占地范围额外扩张的安全距离。")]
+    public float planningObstacleSafetyPadding = 0.8f;
+
+    [Tooltip("规划完成后再次检查路径是否穿过建筑占地范围；不安全则判定规划失败。")]
+    public bool rejectUnsafePlannerResults = true;
+
+    [Tooltip("规划前自动扩展规划边界，使当前无人机、任务点和相关障碍物落入规划地图。")]
+    public bool autoFitPlanningBoundsToScene = true;
+
+    [Tooltip("自动适配规划边界时，围绕任务区域额外保留的水平边距。")]
+    public float autoPlanningBoundsPadding = 12f;
+
+    [Tooltip("自动适配规划边界时用于过滤异常大障碍包围盒的水平跨度阈值，避免城市大场景生成过大的 A* 网格。")]
+    public float maxAutoPlanningBoundsSpan = 220f;
+
     void Awake()
     {
         // 单例
@@ -125,6 +143,8 @@ public class DroneManager : MonoBehaviour
     private void OnEnable()
     {
         simulationContext = SimulationContext.GetOrCreate(this);
+        simulationContext.TasksChanged += HandlePlanningCoverageChanged;
+        simulationContext.SpawnPointsChanged += HandlePlanningCoverageChanged;
         simulationContext.ObstaclesChanged += HandleRuntimeObstaclesChanged;
     }
 
@@ -135,6 +155,8 @@ public class DroneManager : MonoBehaviour
             return;
         }
 
+        simulationContext.TasksChanged -= HandlePlanningCoverageChanged;
+        simulationContext.SpawnPointsChanged -= HandlePlanningCoverageChanged;
         simulationContext.ObstaclesChanged -= HandleRuntimeObstaclesChanged;
         simulationContext = null;
     }
@@ -369,6 +391,7 @@ public class DroneManager : MonoBehaviour
         planningWorldMax = worldMax;
 
         RefreshObstacleConfiguration();
+        InvalidatePlanningMap();
     }
 
     public Vector3 ToCruisePosition(Vector3 position)
@@ -506,12 +529,20 @@ public class DroneManager : MonoBehaviour
         {
             RefreshObstacleFootprintCache();
         }
+
+        InvalidatePlanningMap();
     }
 
     private void HandleRuntimeObstaclesChanged()
     {
         obstacleFootprintCacheInitialized = false;
+        InvalidatePlanningMap();
         RefreshObstacleConfiguration();
+    }
+
+    private void HandlePlanningCoverageChanged()
+    {
+        InvalidatePlanningMap();
     }
 
     public Transform EnsureObstacleRootExists()
@@ -611,32 +642,14 @@ public class DroneManager : MonoBehaviour
 
     public bool IsPointInsideObstacleFootprint(Vector3 worldPoint, float padding = 0.15f)
     {
-        EnsureObstacleFootprintCache();
-
-        for (int i = 0; i < obstacleFootprintBounds.Count; i++)
-        {
-            if (IsPointInsideBoundsXZ(worldPoint, obstacleFootprintBounds[i], padding))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        PlanningGridMap map = GetOrBuildPlanningMap();
+        return map != null && map.IsBlocked(map.WorldToGrid(worldPoint));
     }
 
     public bool DoesSegmentCrossObstacleFootprint(Vector3 startWorldPoint, Vector3 endWorldPoint, float padding = 0.15f)
     {
-        EnsureObstacleFootprintCache();
-
-        for (int i = 0; i < obstacleFootprintBounds.Count; i++)
-        {
-            if (SegmentIntersectsBoundsXZ(startWorldPoint, endWorldPoint, obstacleFootprintBounds[i], padding))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        PlanningGridMap map = GetOrBuildPlanningMap();
+        return map != null && !map.IsSegmentClear(startWorldPoint, endWorldPoint);
     }
 
     public bool DoesPolylineCrossObstacleFootprint(IList<Vector3> points, float padding = 0.15f)
@@ -646,20 +659,301 @@ public class DroneManager : MonoBehaviour
             return false;
         }
 
-        if (IsPointInsideObstacleFootprint(points[0], padding))
+        PlanningGridMap map = GetOrBuildPlanningMap();
+        if (map == null)
+        {
+            return false;
+        }
+
+        if (map.IsBlocked(map.WorldToGrid(points[0])))
         {
             return true;
         }
 
         for (int i = 1; i < points.Count; i++)
         {
-            if (DoesSegmentCrossObstacleFootprint(points[i - 1], points[i], padding))
+            if (!map.IsSegmentClear(points[i - 1], points[i]))
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    public List<Bounds> GetObstacleFootprintBoundsSnapshot()
+    {
+        EnsureObstacleFootprintCache();
+        return new List<Bounds>(obstacleFootprintBounds);
+    }
+
+    public float GetPlanningObstacleSafetyPadding()
+    {
+        return Mathf.Max(0.15f, planningObstacleSafetyPadding);
+    }
+
+    public bool FitPlanningBoundsToCurrentScene()
+    {
+        bool changed = FitPlanningBoundsToCurrentSceneInternal(true);
+        if (changed)
+        {
+            Debug.Log(
+                $"[DroneManager] Planning bounds fitted to scene: X[{planningWorldMin.x:0.#},{planningWorldMax.x:0.#}] Z[{planningWorldMin.z:0.#},{planningWorldMax.z:0.#}]");
+        }
+
+        return changed;
+    }
+
+    public PlanningGridMap GetOrBuildPlanningMap()
+    {
+        EnsurePlanningObstacleLayerConfigured();
+
+        if (autoFitPlanningBoundsToScene)
+        {
+            FitPlanningBoundsToCurrentSceneInternal(false);
+        }
+
+        string signature = BuildPlanningMapSignature();
+        if (cachedPlanningMap != null &&
+            cachedPlanningMap.IsValid &&
+            !planningMapDirty &&
+            string.Equals(cachedPlanningMapSignature, signature, System.StringComparison.Ordinal))
+        {
+            return cachedPlanningMap;
+        }
+
+        if (autoConfigurePlanningObstacles)
+        {
+            ConfigurePlanningObstacles();
+        }
+        else
+        {
+            RefreshObstacleFootprintCache();
+        }
+
+        cachedPlanningMap = PlanningMapBuilder.BuildFromBounds(
+            planningWorldMin,
+            planningWorldMax,
+            planningGridCellSize,
+            obstacleFootprintBounds,
+            GetPlanningObstacleSafetyPadding());
+        cachedPlanningMapSignature = signature;
+        planningMapDirty = false;
+
+        Debug.Log(
+            $"[DroneManager] Planning grid rebuilt: {cachedPlanningMap.width}x{cachedPlanningMap.height}, blocked={cachedPlanningMap.BlockedCellCount}");
+        return cachedPlanningMap;
+    }
+
+    private void InvalidatePlanningMap()
+    {
+        planningMapDirty = true;
+    }
+
+    private string BuildPlanningMapSignature()
+    {
+        Transform root = ResolveObstacleRoot();
+        int rootId = root != null ? root.GetInstanceID() : 0;
+        int childVersion = root != null ? CountObstacleHierarchyNodes(root) : 0;
+        return string.Join(
+            "|",
+            Mathf.RoundToInt(planningWorldMin.x * 100f),
+            Mathf.RoundToInt(planningWorldMin.z * 100f),
+            Mathf.RoundToInt(planningWorldMax.x * 100f),
+            Mathf.RoundToInt(planningWorldMax.z * 100f),
+            Mathf.RoundToInt(planningGridCellSize * 100f),
+            Mathf.RoundToInt(GetPlanningObstacleSafetyPadding() * 100f),
+            rootId,
+            childVersion);
+    }
+
+    private bool FitPlanningBoundsToCurrentSceneInternal(bool allowShrink)
+    {
+        if (!TryBuildPlanningCoverageBounds(out Bounds coverageBounds))
+        {
+            return false;
+        }
+
+        float padding = Mathf.Max(autoPlanningBoundsPadding, planningGridCellSize * 2f);
+        Bounds desiredBounds = coverageBounds;
+        desiredBounds.Expand(new Vector3(padding * 2f, 0f, padding * 2f));
+
+        EnsureObstacleFootprintCache();
+        Bounds obstacleQueryBounds = desiredBounds;
+        float obstacleSpanLimit = Mathf.Max(
+            maxAutoPlanningBoundsSpan,
+            desiredBounds.size.x,
+            desiredBounds.size.z,
+            planningGridCellSize * 4f);
+        for (int i = 0; i < obstacleFootprintBounds.Count; i++)
+        {
+            Bounds obstacleBounds = obstacleFootprintBounds[i];
+            if (obstacleBounds.size.sqrMagnitude <= 0.0001f)
+            {
+                continue;
+            }
+
+            if (IntersectsBoundsXZ(obstacleQueryBounds, obstacleBounds))
+            {
+                Bounds candidateBounds = desiredBounds;
+                candidateBounds.Encapsulate(obstacleBounds);
+                if (GetHorizontalSpan(candidateBounds) <= obstacleSpanLimit)
+                {
+                    desiredBounds = candidateBounds;
+                }
+            }
+        }
+
+        desiredBounds.Expand(new Vector3(padding * 2f, 0f, padding * 2f));
+
+        Vector3 desiredMin = new Vector3(
+            desiredBounds.min.x,
+            Mathf.Min(planningWorldMin.y, 0f),
+            desiredBounds.min.z);
+        Vector3 desiredMax = new Vector3(
+            desiredBounds.max.x,
+            Mathf.Max(planningWorldMax.y, cruiseHeight + 5f),
+            desiredBounds.max.z);
+
+        if (!allowShrink)
+        {
+            desiredMin.x = Mathf.Min(planningWorldMin.x, desiredMin.x);
+            desiredMin.z = Mathf.Min(planningWorldMin.z, desiredMin.z);
+            desiredMax.x = Mathf.Max(planningWorldMax.x, desiredMax.x);
+            desiredMax.z = Mathf.Max(planningWorldMax.z, desiredMax.z);
+        }
+
+        ClampDesiredPlanningSpan(ref desiredMin, ref desiredMax);
+
+        if (ApproximatelySameBounds(planningWorldMin, planningWorldMax, desiredMin, desiredMax))
+        {
+            return false;
+        }
+
+        planningWorldMin = desiredMin;
+        planningWorldMax = desiredMax;
+        InvalidatePlanningMap();
+        return true;
+    }
+
+    private bool TryBuildPlanningCoverageBounds(out Bounds coverageBounds)
+    {
+        coverageBounds = default;
+        bool hasBounds = false;
+
+        for (int i = 0; i < drones.Count; i++)
+        {
+            DroneController drone = drones[i];
+            if (drone != null)
+            {
+                EncapsulatePlanningPoint(ref coverageBounds, ref hasBounds, ToCruisePosition(drone.transform.position));
+            }
+        }
+
+        TaskPoint[] taskPoints = SimulationContext.GetOrCreate(this).GetTaskPoints();
+        for (int i = 0; i < taskPoints.Length; i++)
+        {
+            TaskPoint taskPoint = taskPoints[i];
+            if (taskPoint != null)
+            {
+                EncapsulatePlanningPoint(ref coverageBounds, ref hasBounds, ToCruisePosition(taskPoint.transform.position));
+            }
+        }
+
+        DroneSpawnPointMarker[] spawnPoints = SimulationContext.GetOrCreate(this).GetSpawnPointMarkers();
+        for (int i = 0; i < spawnPoints.Length; i++)
+        {
+            DroneSpawnPointMarker spawnPoint = spawnPoints[i];
+            if (spawnPoint != null)
+            {
+                EncapsulatePlanningPoint(ref coverageBounds, ref hasBounds, ToCruisePosition(spawnPoint.transform.position));
+            }
+        }
+
+        if (!hasBounds)
+        {
+            Vector3 center = (planningWorldMin + planningWorldMax) * 0.5f;
+            coverageBounds = new Bounds(center, planningWorldMax - planningWorldMin);
+            return coverageBounds.size.sqrMagnitude > 0.0001f;
+        }
+
+        return true;
+    }
+
+    private static void EncapsulatePlanningPoint(ref Bounds bounds, ref bool hasBounds, Vector3 point)
+    {
+        if (!hasBounds)
+        {
+            bounds = new Bounds(point, Vector3.zero);
+            hasBounds = true;
+            return;
+        }
+
+        bounds.Encapsulate(point);
+    }
+
+    private void ClampDesiredPlanningSpan(ref Vector3 desiredMin, ref Vector3 desiredMax)
+    {
+        float minimumSpan = Mathf.Max(planningGridCellSize * 2f, 4f);
+        float requiredSpanX = Mathf.Max(minimumSpan, desiredMax.x - desiredMin.x);
+        float requiredSpanZ = Mathf.Max(minimumSpan, desiredMax.z - desiredMin.z);
+        float spanLimit = Mathf.Max(maxAutoPlanningBoundsSpan, requiredSpanX, requiredSpanZ, minimumSpan);
+
+        ClampAxisToSpan(ref desiredMin.x, ref desiredMax.x, spanLimit, minimumSpan);
+        ClampAxisToSpan(ref desiredMin.z, ref desiredMax.z, spanLimit, minimumSpan);
+    }
+
+    private static void ClampAxisToSpan(ref float min, ref float max, float spanLimit, float minimumSpan)
+    {
+        float span = Mathf.Max(max - min, minimumSpan);
+        if (span <= spanLimit)
+        {
+            return;
+        }
+
+        float center = (min + max) * 0.5f;
+        float halfSpan = spanLimit * 0.5f;
+        min = center - halfSpan;
+        max = center + halfSpan;
+    }
+
+    private static bool IntersectsBoundsXZ(Bounds first, Bounds second)
+    {
+        return first.min.x <= second.max.x &&
+               first.max.x >= second.min.x &&
+               first.min.z <= second.max.z &&
+               first.max.z >= second.min.z;
+    }
+
+    private static float GetHorizontalSpan(Bounds bounds)
+    {
+        return Mathf.Max(bounds.size.x, bounds.size.z);
+    }
+
+    private static bool ApproximatelySameBounds(
+        Vector3 currentMin,
+        Vector3 currentMax,
+        Vector3 desiredMin,
+        Vector3 desiredMax)
+    {
+        return Vector3.SqrMagnitude(currentMin - desiredMin) <= 0.0001f &&
+               Vector3.SqrMagnitude(currentMax - desiredMax) <= 0.0001f;
+    }
+
+    private static int CountObstacleHierarchyNodes(Transform root)
+    {
+        if (root == null)
+        {
+            return 0;
+        }
+
+        int count = 1;
+        foreach (Transform child in root)
+        {
+            count += CountObstacleHierarchyNodes(child);
+        }
+
+        return count;
     }
 
     /// <summary>
@@ -819,8 +1113,11 @@ public class DroneManager : MonoBehaviour
         }
 
         IPathPlanner planner = CreatePathPlanner(plannerType);
+        PlanningGridMap planningMap = GetOrBuildPlanningMap();
+
         Vector3 startPosition = ToCruisePosition(drone.transform.position);
         Vector3 targetPosition = ToCruisePosition(taskPoint.transform.position);
+        float obstacleSafetyPadding = GetPlanningObstacleSafetyPadding();
         PathPlanningRequest request = new PathPlanningRequest
         {
             droneId = droneId,
@@ -830,6 +1127,8 @@ public class DroneManager : MonoBehaviour
             worldMin = planningWorldMin,
             worldMax = planningWorldMax,
             obstacleLayer = planningObstacleLayer,
+            planningMap = planningMap,
+            obstacleSafetyPadding = obstacleSafetyPadding,
             allowDiagonal = allowDiagonalPlanning
         };
 
@@ -843,6 +1142,7 @@ public class DroneManager : MonoBehaviour
             : planner.PlanPath(request);
 
         NormalizePlanningResultToCruiseHeight(result);
+        RejectUnsafePlannerResultIfNeeded(result, obstacleSafetyPadding);
 
         if (recorder != null && visualizer != null)
         {
@@ -865,6 +1165,28 @@ public class DroneManager : MonoBehaviour
         }
 
         return result;
+    }
+
+    private void RejectUnsafePlannerResultIfNeeded(PathPlanningResult result, float obstaclePadding)
+    {
+        if (!rejectUnsafePlannerResults || result == null || !result.HasPath())
+        {
+            return;
+        }
+
+        if (!DoesPolylineCrossObstacleFootprint(result.waypoints, obstaclePadding))
+        {
+            return;
+        }
+
+        string originalMessage = string.IsNullOrWhiteSpace(result.message)
+            ? string.Empty
+            : $"{result.message}; ";
+        result.success = false;
+        result.message = $"{originalMessage}规划路径穿过建筑或障碍物占地区域，已拒绝该路径";
+        result.waypoints = new List<Vector3>();
+        result.totalCost = 0f;
+        Debug.LogWarning($"[DroneManager] {result.plannerName} returned an unsafe path and it was rejected.");
     }
 
     private AlgorithmVisualizerManager ResolveAlgorithmVisualizerManager()
@@ -1055,6 +1377,8 @@ public class DroneManager : MonoBehaviour
             return;
         }
 
+        AddAggregateObstacleFootprints(root);
+
         Collider[] colliders = root.GetComponentsInChildren<Collider>(true);
         for (int i = 0; i < colliders.Length; i++)
         {
@@ -1071,11 +1395,6 @@ public class DroneManager : MonoBehaviour
             }
 
             obstacleFootprintBounds.Add(bounds);
-        }
-
-        if (obstacleFootprintBounds.Count > 0)
-        {
-            return;
         }
 
         Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
@@ -1097,84 +1416,93 @@ public class DroneManager : MonoBehaviour
         }
     }
 
-    private static bool IsPointInsideBoundsXZ(Vector3 point, Bounds bounds, float padding)
+    private void AddAggregateObstacleFootprints(Transform root)
     {
-        float minX = bounds.min.x - padding;
-        float maxX = bounds.max.x + padding;
-        float minZ = bounds.min.z - padding;
-        float maxZ = bounds.max.z + padding;
+        foreach (Transform child in root)
+        {
+            if (child == null)
+            {
+                continue;
+            }
 
-        return point.x >= minX &&
-               point.x <= maxX &&
-               point.z >= minZ &&
-               point.z <= maxZ;
+            if (string.Equals(child.name, "RuntimeObstacles", System.StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (Transform runtimeObstacle in child)
+                {
+                    AddAggregateObstacleFootprint(runtimeObstacle);
+                }
+
+                continue;
+            }
+
+            AddAggregateObstacleFootprint(child);
+        }
     }
 
-    private static bool SegmentIntersectsBoundsXZ(Vector3 start, Vector3 end, Bounds bounds, float padding)
+    private void AddAggregateObstacleFootprint(Transform obstacleTransform)
     {
-        float minX = bounds.min.x - padding;
-        float maxX = bounds.max.x + padding;
-        float minZ = bounds.min.z - padding;
-        float maxZ = bounds.max.z + padding;
-
-        if ((start.x < minX && end.x < minX) ||
-            (start.x > maxX && end.x > maxX) ||
-            (start.z < minZ && end.z < minZ) ||
-            (start.z > maxZ && end.z > maxZ))
+        if (obstacleTransform == null)
         {
-            return false;
+            return;
         }
 
-        if (IsPointInsideBoundsXZ(start, bounds, padding) || IsPointInsideBoundsXZ(end, bounds, padding))
+        if (TryCalculateAggregateWorldBounds(obstacleTransform, out Bounds bounds))
+        {
+            obstacleFootprintBounds.Add(bounds);
+        }
+    }
+
+    private static bool TryCalculateAggregateWorldBounds(Transform root, out Bounds aggregateBounds)
+    {
+        aggregateBounds = default;
+        bool hasBounds = false;
+
+        Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null || renderer.bounds.size.sqrMagnitude <= 0.0001f)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                aggregateBounds = renderer.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                aggregateBounds.Encapsulate(renderer.bounds);
+            }
+        }
+
+        if (hasBounds)
         {
             return true;
         }
 
-        float deltaX = end.x - start.x;
-        float deltaZ = end.z - start.z;
-        float tMin = 0f;
-        float tMax = 1f;
-
-        return ClipLine(-deltaX, start.x - minX, ref tMin, ref tMax) &&
-               ClipLine(deltaX, maxX - start.x, ref tMin, ref tMax) &&
-               ClipLine(-deltaZ, start.z - minZ, ref tMin, ref tMax) &&
-               ClipLine(deltaZ, maxZ - start.z, ref tMin, ref tMax);
-    }
-
-    private static bool ClipLine(float denominator, float numerator, ref float tMin, ref float tMax)
-    {
-        if (Mathf.Abs(denominator) <= 0.0001f)
+        Collider[] colliders = root.GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < colliders.Length; i++)
         {
-            return numerator >= 0f;
-        }
-
-        float t = numerator / denominator;
-        if (denominator > 0f)
-        {
-            if (t > tMax)
+            Collider collider = colliders[i];
+            if (collider == null || collider.bounds.size.sqrMagnitude <= 0.0001f)
             {
-                return false;
+                continue;
             }
 
-            if (t > tMin)
+            if (!hasBounds)
             {
-                tMin = t;
+                aggregateBounds = collider.bounds;
+                hasBounds = true;
             }
-        }
-        else
-        {
-            if (t < tMin)
+            else
             {
-                return false;
-            }
-
-            if (t < tMax)
-            {
-                tMax = t;
+                aggregateBounds.Encapsulate(collider.bounds);
             }
         }
 
-        return true;
+        return hasBounds;
     }
 
     private void ApplyLayerRecursively(GameObject root, int layer)

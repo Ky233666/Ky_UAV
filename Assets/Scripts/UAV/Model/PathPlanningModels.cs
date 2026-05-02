@@ -43,6 +43,16 @@ public class PathPlanningRequest
     public LayerMask obstacleLayer;
 
     /// <summary>
+    /// Cached occupancy grid used by path planners for fast obstacle queries.
+    /// </summary>
+    public PlanningGridMap planningMap;
+
+    /// <summary>
+    /// Horizontal safety margin applied around obstacle footprints.
+    /// </summary>
+    public float obstacleSafetyPadding = 0.75f;
+
+    /// <summary>
     /// 是否允许对角线移动。
     /// </summary>
     public bool allowDiagonal = true;

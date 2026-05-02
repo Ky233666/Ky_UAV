@@ -146,66 +146,23 @@ public static class PathPlanningVisualizationBuilder
     private static List<Vector3> BuildBlockedNodePreview(PathPlanningRequest request)
     {
         List<Vector3> blockedNodes = new List<Vector3>();
-        if (request == null || request.obstacleLayer.value == 0 || request.gridCellSize <= 0f)
+        if (request == null || request.gridCellSize <= 0f)
         {
             return blockedNodes;
         }
 
-        int width = Mathf.RoundToInt((request.worldMax.x - request.worldMin.x) / request.gridCellSize) + 1;
-        int height = Mathf.RoundToInt((request.worldMax.z - request.worldMin.z) / request.gridCellSize) + 1;
-        if (width <= 0 || height <= 0 || width * height > MaxObstaclePreviewCells)
+        PlanningGridMap map = request.planningMap;
+        if (map == null || !map.IsValid)
         {
             return blockedNodes;
         }
 
-        HashSet<string> keys = new HashSet<string>();
-        for (int x = 0; x < width && blockedNodes.Count < MaxBlockedPreviewNodes; x++)
+        if (map.width * map.height > MaxObstaclePreviewCells)
         {
-            for (int z = 0; z < height && blockedNodes.Count < MaxBlockedPreviewNodes; z++)
-            {
-                Vector3 point = new Vector3(
-                    request.worldMin.x + x * request.gridCellSize,
-                    Mathf.Lerp(request.worldMin.y, request.worldMax.y, 0.5f),
-                    request.worldMin.z + z * request.gridCellSize);
-
-                if (ApproximatelySamePoint(point, request.startPosition) ||
-                    ApproximatelySamePoint(point, request.targetPosition) ||
-                    !IsBlocked(point, request))
-                {
-                    continue;
-                }
-
-                if (keys.Add(BuildPointKey(point)))
-                {
-                    blockedNodes.Add(point);
-                }
-            }
+            return blockedNodes;
         }
 
-        return blockedNodes;
+        return map.GetBlockedWorldPositions(MaxBlockedPreviewNodes);
     }
 
-    private static bool IsBlocked(Vector3 worldPosition, PathPlanningRequest request)
-    {
-        float horizontalHalfExtent = Mathf.Max(request.gridCellSize * 0.5f, 0.2f);
-        float verticalHalfExtent = Mathf.Max((request.worldMax.y - request.worldMin.y) * 0.5f, 1f);
-        Vector3 halfExtents = new Vector3(horizontalHalfExtent, verticalHalfExtent, horizontalHalfExtent);
-        Vector3 probeCenter = new Vector3(worldPosition.x, request.worldMin.y + verticalHalfExtent, worldPosition.z);
-        return Physics.CheckBox(
-            probeCenter,
-            halfExtents,
-            Quaternion.identity,
-            request.obstacleLayer,
-            QueryTriggerInteraction.Ignore);
-    }
-
-    private static bool ApproximatelySamePoint(Vector3 a, Vector3 b)
-    {
-        return Vector3.SqrMagnitude(a - b) <= 0.0001f;
-    }
-
-    private static string BuildPointKey(Vector3 point)
-    {
-        return $"{Mathf.RoundToInt(point.x * 100f)}_{Mathf.RoundToInt(point.y * 100f)}_{Mathf.RoundToInt(point.z * 100f)}";
-    }
 }

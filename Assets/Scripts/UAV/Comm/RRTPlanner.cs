@@ -9,8 +9,6 @@ using UnityEngine;
 public class RRTPlanner : IPathPlannerWithVisualization
 {
     private const float GoalSampleProbability = 0.20f;
-    private const float NodeCollisionPadding = 0.30f;
-    private const float SegmentCollisionPadding = 0.32f;
 
     public string PlannerName => "RRT";
 
@@ -50,8 +48,13 @@ public class RRTPlanner : IPathPlannerWithVisualization
             return result;
         }
 
-        if (!IsInsideBounds(request.startPosition, request.worldMin, request.worldMax) ||
-            !IsInsideBounds(request.targetPosition, request.worldMin, request.worldMax))
+        if (request.planningMap == null || !request.planningMap.IsValid)
+        {
+            request.planningMap = new PlanningGridMap(request.worldMin, request.worldMax, request.gridCellSize);
+        }
+
+        if (!request.planningMap.IsWorldInside(request.startPosition) ||
+            !request.planningMap.IsWorldInside(request.targetPosition))
         {
             result.message = "起点或终点超出规划边界";
             PathPlanningVisualizationBuilder.RecordSearchFinished(recorder, false, result.message);
@@ -98,7 +101,7 @@ public class RRTPlanner : IPathPlannerWithVisualization
             Vector3 nearest = tree[nearestIndex].position;
             Vector3 newPoint = SteerTowards(nearest, sample, stepSize, request.startPosition.y);
 
-            if (!IsInsideBounds(newPoint, request.worldMin, request.worldMax))
+            if (!request.planningMap.IsWorldInside(newPoint))
             {
                 RecordRejectedExpansion(
                     recorder,
@@ -437,64 +440,16 @@ public class RRTPlanner : IPathPlannerWithVisualization
         return next;
     }
 
-    private static bool IsInsideBounds(Vector3 point, Vector3 worldMin, Vector3 worldMax)
-    {
-        return point.x >= worldMin.x && point.x <= worldMax.x &&
-               point.z >= worldMin.z && point.z <= worldMax.z;
-    }
-
     private static bool IsPointBlocked(Vector3 point, PathPlanningRequest request)
     {
-        if (request.obstacleLayer.value == 0)
-        {
-            return false;
-        }
-
-        float verticalHalfExtent = Mathf.Max((request.worldMax.y - request.worldMin.y) * 0.5f, 1f);
-        Vector3 halfExtents = new Vector3(
-            Mathf.Max(request.gridCellSize * NodeCollisionPadding, 0.2f),
-            verticalHalfExtent,
-            Mathf.Max(request.gridCellSize * NodeCollisionPadding, 0.2f));
-        Vector3 probeCenter = new Vector3(point.x, request.worldMin.y + verticalHalfExtent, point.z);
-        return Physics.CheckBox(
-            probeCenter,
-            halfExtents,
-            Quaternion.identity,
-            request.obstacleLayer,
-            QueryTriggerInteraction.Ignore);
+        PlanningGridMap map = request.planningMap;
+        return map != null && map.IsBlocked(map.WorldToGrid(point));
     }
 
     private static bool IsSegmentBlocked(Vector3 from, Vector3 to, PathPlanningRequest request)
     {
-        if (request.obstacleLayer.value == 0)
-        {
-            return false;
-        }
-
-        Vector3 direction = to - from;
-        direction.y = 0f;
-        float distance = direction.magnitude;
-        if (distance <= 0.01f)
-        {
-            return false;
-        }
-
-        Vector3 normalizedDirection = direction / distance;
-        float verticalHalfExtent = Mathf.Max((request.worldMax.y - request.worldMin.y) * 0.5f, 1f);
-        Vector3 halfExtents = new Vector3(
-            Mathf.Max(request.gridCellSize * SegmentCollisionPadding, 0.25f),
-            verticalHalfExtent,
-            Mathf.Max(request.gridCellSize * SegmentCollisionPadding, 0.25f));
-        Vector3 center = new Vector3(from.x, request.worldMin.y + verticalHalfExtent, from.z);
-
-        return Physics.BoxCast(
-            center,
-            halfExtents,
-            normalizedDirection,
-            Quaternion.identity,
-            distance,
-            request.obstacleLayer,
-            QueryTriggerInteraction.Ignore);
+        PlanningGridMap map = request.planningMap;
+        return map != null && !map.IsSegmentClear(from, to);
     }
 
     private static List<Vector3> BuildWaypoints(List<RRTNode> tree, int goalIndex, PathPlanningRequest request)

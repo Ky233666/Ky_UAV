@@ -503,6 +503,28 @@ public class DroneStateMachine : MonoBehaviour
                 droneController.hasArrived = false;
                 return true;
             }
+
+            bool canFallbackToDirectTarget =
+                !preferObstacleAwarePlanner &&
+                DroneManager.Instance.pathPlannerType == PathPlannerType.StraightLine;
+            if (!canFallbackToDirectTarget)
+            {
+                string reason = pathResult != null && !string.IsNullOrWhiteSpace(pathResult.message)
+                    ? pathResult.message
+                    : "路径规划失败，未生成可执行路径";
+                droneData.plannedPath.Clear();
+                droneData.currentWaypointIndex = 0;
+                droneController.ClearTarget();
+                droneController.hasArrived = false;
+
+                if (currentState == DroneState.Moving)
+                {
+                    RegisterConflict("pathplanning:failed", reason);
+                    SetWaiting(reason);
+                }
+
+                return false;
+            }
         }
 
         droneData.plannedPath.Clear();

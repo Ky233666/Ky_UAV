@@ -68,13 +68,22 @@ public class AStarPlanner : IPathPlannerWithVisualization
             return result;
         }
 
-        GridDefinition grid = new GridDefinition(request.worldMin, request.worldMax, request.gridCellSize);
+        PlanningGridMap grid = request.planningMap != null && request.planningMap.IsValid
+            ? request.planningMap
+            : new PlanningGridMap(request.worldMin, request.worldMax, request.gridCellSize);
         Vector2Int start = grid.WorldToGrid(request.startPosition);
         Vector2Int goal = grid.WorldToGrid(request.targetPosition);
 
-        if (!grid.IsInside(start) || !grid.IsInside(goal))
+        if (!grid.IsWorldInside(request.startPosition) || !grid.IsWorldInside(request.targetPosition))
         {
             result.message = "起点或终点超出规划边界";
+            PathPlanningVisualizationBuilder.RecordSearchFinished(recorder, false, result.message);
+            return result;
+        }
+
+        if (grid.IsBlocked(start) || grid.IsBlocked(goal))
+        {
+            result.message = "起点或终点位于规划障碍区域内";
             PathPlanningVisualizationBuilder.RecordSearchFinished(recorder, false, result.message);
             return result;
         }
@@ -106,9 +115,7 @@ public class AStarPlanner : IPathPlannerWithVisualization
                 List<Vector3> rawPath = BuildRawWaypoints(current, grid, request);
                 result.waypoints = SimplifyWaypoints(
                     new List<Vector3>(rawPath),
-                    request.obstacleLayer,
-                    request.worldMin.y,
-                    request.worldMax.y);
+                    grid);
                 result.totalCost = current.gCost * request.gridCellSize;
                 result.success = true;
                 result.message = $"A* 规划成功，路径点数量：{result.waypoints.Count}";
@@ -145,8 +152,7 @@ public class AStarPlanner : IPathPlannerWithVisualization
                     continue;
                 }
 
-                bool isStartOrGoal = neighborPos == start || neighborPos == goal;
-                if (!isStartOrGoal && IsBlocked(neighborWorld, request))
+                if (grid.IsBlocked(neighborPos))
                 {
                     RecordRejectedNeighbor(
                         recorder,
@@ -204,7 +210,7 @@ public class AStarPlanner : IPathPlannerWithVisualization
     private static void RecordExpandedCurrent(
         PathPlanningVisualizationRecorder recorder,
         NodeRecord current,
-        GridDefinition grid,
+        PlanningGridMap grid,
         PathPlanningRequest request,
         int expansionOrder,
         int openCount,
@@ -233,7 +239,7 @@ public class AStarPlanner : IPathPlannerWithVisualization
     private static void RecordClosedNode(
         PathPlanningVisualizationRecorder recorder,
         NodeRecord current,
-        GridDefinition grid,
+        PlanningGridMap grid,
         int expansionOrder,
         int openCount,
         int closedCount)
@@ -259,7 +265,7 @@ public class AStarPlanner : IPathPlannerWithVisualization
         NodeRecord current,
         NodeRecord previousParent,
         NodeRecord neighbor,
-        GridDefinition grid,
+        PlanningGridMap grid,
         PathPlanningRequest request,
         int frontierOrder,
         int openCount,
@@ -308,7 +314,7 @@ public class AStarPlanner : IPathPlannerWithVisualization
         PathPlanningVisualizationRecorder recorder,
         NodeRecord current,
         Vector3 neighborWorld,
-        GridDefinition grid,
+        PlanningGridMap grid,
         HashSet<string> blockedNodeKeys,
         string description,
         PathPlanningVisualizationNodeRole rejectedRole)
@@ -414,7 +420,7 @@ public class AStarPlanner : IPathPlannerWithVisualization
     private static bool IsDiagonalCornerCut(
         Vector2Int current,
         Vector2Int diagonalNeighbor,
-        GridDefinition grid,
+        PlanningGridMap grid,
         PathPlanningRequest request,
         Vector2Int start,
         Vector2Int goal)
@@ -430,28 +436,14 @@ public class AStarPlanner : IPathPlannerWithVisualization
         bool horizontalIsStartOrGoal = horizontal == start || horizontal == goal;
         bool verticalIsStartOrGoal = vertical == start || vertical == goal;
 
-        bool horizontalBlocked = !horizontalIsStartOrGoal && IsBlocked(grid.GridToWorld(horizontal), request);
-        bool verticalBlocked = !verticalIsStartOrGoal && IsBlocked(grid.GridToWorld(vertical), request);
+        bool horizontalBlocked = !horizontalIsStartOrGoal && grid.IsBlocked(horizontal);
+        bool verticalBlocked = !verticalIsStartOrGoal && grid.IsBlocked(vertical);
         return horizontalBlocked || verticalBlocked;
-    }
-
-    private static bool IsBlocked(Vector3 worldPosition, PathPlanningRequest request)
-    {
-        if (request.obstacleLayer.value == 0)
-        {
-            return false;
-        }
-
-        float horizontalHalfExtent = Mathf.Max(request.gridCellSize * 0.5f, 0.15f);
-        float verticalHalfExtent = Mathf.Max((request.worldMax.y - request.worldMin.y) * 0.5f, 1f);
-        Vector3 halfExtents = new Vector3(horizontalHalfExtent, verticalHalfExtent, horizontalHalfExtent);
-        Vector3 probeCenter = new Vector3(worldPosition.x, request.worldMin.y + verticalHalfExtent, worldPosition.z);
-        return Physics.CheckBox(probeCenter, halfExtents, Quaternion.identity, request.obstacleLayer, QueryTriggerInteraction.Ignore);
     }
 
     private static List<Vector3> BuildRawWaypoints(
         NodeRecord goalNode,
-        GridDefinition grid,
+        PlanningGridMap grid,
         PathPlanningRequest request)
     {
         List<Vector3> reversed = new List<Vector3>();
@@ -483,7 +475,7 @@ public class AStarPlanner : IPathPlannerWithVisualization
 
     private static List<Vector3> BuildPathToNode(
         NodeRecord node,
-        GridDefinition grid,
+        PlanningGridMap grid,
         PathPlanningRequest request)
     {
         if (node == null)
@@ -514,9 +506,7 @@ public class AStarPlanner : IPathPlannerWithVisualization
 
     private static List<Vector3> SimplifyWaypoints(
         List<Vector3> rawWaypoints,
-        LayerMask obstacleLayer,
-        float worldMinY,
-        float worldMaxY)
+        PlanningGridMap grid)
     {
         if (rawWaypoints == null || rawWaypoints.Count <= 2)
         {
@@ -530,12 +520,8 @@ public class AStarPlanner : IPathPlannerWithVisualization
         for (int i = 1; i < rawWaypoints.Count - 1; i++)
         {
             bool directionChanged = HasDirectionChanged(rawWaypoints[i - 1], rawWaypoints[i], rawWaypoints[i + 1]);
-            bool shortcutBlocked = IsShortcutBlocked(
-                rawWaypoints[anchorIndex],
-                rawWaypoints[i + 1],
-                obstacleLayer,
-                worldMinY,
-                worldMaxY);
+            bool shortcutBlocked = grid != null &&
+                !grid.IsSegmentClear(rawWaypoints[anchorIndex], rawWaypoints[i + 1]);
 
             if (directionChanged || shortcutBlocked)
             {
@@ -553,40 +539,6 @@ public class AStarPlanner : IPathPlannerWithVisualization
         Vector2 prevDir = new Vector2(current.x - previous.x, current.z - previous.z).normalized;
         Vector2 nextDir = new Vector2(next.x - current.x, next.z - current.z).normalized;
         return Vector2.Distance(prevDir, nextDir) > 0.01f;
-    }
-
-    private static bool IsShortcutBlocked(
-        Vector3 from,
-        Vector3 to,
-        LayerMask obstacleLayer,
-        float worldMinY,
-        float worldMaxY)
-    {
-        if (obstacleLayer.value == 0)
-        {
-            return false;
-        }
-
-        Vector3 direction = to - from;
-        float distance = direction.magnitude;
-        if (distance <= 0.01f)
-        {
-            return false;
-        }
-
-        float verticalHalfExtent = Mathf.Max((worldMaxY - worldMinY) * 0.5f, 1f);
-        Vector3 halfExtents = new Vector3(0.35f, verticalHalfExtent, 0.35f);
-        Vector3 center = new Vector3(from.x, worldMinY + verticalHalfExtent, from.z);
-        Vector3 normalizedDirection = direction / distance;
-
-        return Physics.BoxCast(
-            center,
-            halfExtents,
-            normalizedDirection,
-            Quaternion.identity,
-            distance,
-            obstacleLayer,
-            QueryTriggerInteraction.Ignore);
     }
 
     private static string BuildVectorKey(Vector3 position)
@@ -610,46 +562,4 @@ public class AStarPlanner : IPathPlannerWithVisualization
         public float FCost => gCost + hCost;
     }
 
-    private readonly struct GridDefinition
-    {
-        private readonly Vector3 worldMin;
-        private readonly Vector3 worldMax;
-        private readonly float cellSize;
-        private readonly int width;
-        private readonly int height;
-
-        public GridDefinition(Vector3 worldMin, Vector3 worldMax, float cellSize)
-        {
-            this.worldMin = worldMin;
-            this.worldMax = worldMax;
-            this.cellSize = cellSize;
-
-            width = Mathf.Max(1, Mathf.RoundToInt((worldMax.x - worldMin.x) / cellSize) + 1);
-            height = Mathf.Max(1, Mathf.RoundToInt((worldMax.z - worldMin.z) / cellSize) + 1);
-        }
-
-        public bool IsInside(Vector2Int gridPosition)
-        {
-            return gridPosition.x >= 0 && gridPosition.x < width &&
-                   gridPosition.y >= 0 && gridPosition.y < height;
-        }
-
-        public Vector2Int WorldToGrid(Vector3 worldPosition)
-        {
-            float x = Mathf.Clamp(worldPosition.x, worldMin.x, worldMax.x);
-            float z = Mathf.Clamp(worldPosition.z, worldMin.z, worldMax.z);
-
-            int gx = Mathf.RoundToInt((x - worldMin.x) / cellSize);
-            int gz = Mathf.RoundToInt((z - worldMin.z) / cellSize);
-            return new Vector2Int(gx, gz);
-        }
-
-        public Vector3 GridToWorld(Vector2Int gridPosition)
-        {
-            float x = worldMin.x + gridPosition.x * cellSize;
-            float z = worldMin.z + gridPosition.y * cellSize;
-            float y = Mathf.Lerp(worldMin.y, worldMax.y, 0.5f);
-            return new Vector3(x, y, z);
-        }
-    }
 }

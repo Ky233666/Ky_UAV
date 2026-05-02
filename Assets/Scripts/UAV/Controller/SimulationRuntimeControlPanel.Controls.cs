@@ -161,6 +161,100 @@ public partial class SimulationRuntimeControlPanel
         ApplyPlanningSettings();
     }
 
+    private void FitPlanningBoundsToScene()
+    {
+        if (droneManager == null)
+        {
+            transientMessage = "未找到 DroneManager，无法适配规划边界";
+            RefreshAllLabels();
+            return;
+        }
+
+        bool changed = droneManager.FitPlanningBoundsToCurrentScene();
+        configuredPlanningMinX = droneManager.planningWorldMin.x;
+        configuredPlanningMaxX = droneManager.planningWorldMax.x;
+        configuredPlanningMinZ = droneManager.planningWorldMin.z;
+        configuredPlanningMaxZ = droneManager.planningWorldMax.z;
+        configuredPlanningMinY = droneManager.planningWorldMin.y;
+        configuredPlanningMaxY = droneManager.planningWorldMax.y;
+
+        if (EnsurePlanningMapVisualizer())
+        {
+            planningMapVisualizer.SetBoundsVisible(true);
+            planningMapVisualizer.ForceRefresh();
+        }
+
+        transientMessage = changed
+            ? $"规划边界已适配当前无人机、任务点和相关障碍物：X[{configuredPlanningMinX:0},{configuredPlanningMaxX:0}] Z[{configuredPlanningMinZ:0},{configuredPlanningMaxZ:0}]"
+            : "当前规划边界已经覆盖无人机、任务点和相关障碍物";
+        RefreshAllLabels();
+        RefreshSummary();
+    }
+
+    private void TogglePlanningBoundsPreview()
+    {
+        if (!EnsurePlanningMapVisualizer())
+        {
+            transientMessage = "未找到规划地图可视化组件";
+            RefreshAllLabels();
+            return;
+        }
+
+        bool nextVisible = !planningMapVisualizer.showBounds;
+        planningMapVisualizer.SetBoundsVisible(nextVisible);
+        transientMessage = nextVisible ? "规划边界显示已开启" : "规划边界显示已关闭";
+        RefreshAllLabels();
+    }
+
+    private void TogglePlanningBlockedCellPreview()
+    {
+        if (!EnsurePlanningMapVisualizer())
+        {
+            transientMessage = "未找到规划地图可视化组件";
+            RefreshAllLabels();
+            return;
+        }
+
+        bool nextVisible = !planningMapVisualizer.showBlockedCells;
+        planningMapVisualizer.SetBlockedCellsVisible(nextVisible);
+        transientMessage = nextVisible
+            ? planningMapVisualizer.LastPreviewMessage
+            : "规划障碍格显示已关闭";
+        RefreshAllLabels();
+    }
+
+    private bool EnsurePlanningMapVisualizer()
+    {
+        if (planningMapVisualizer == null)
+        {
+            planningMapVisualizer = RuntimeSceneRegistry.Get<PlanningMapVisualizer>(this);
+        }
+
+        if (planningMapVisualizer == null && simulationManager != null)
+        {
+            planningMapVisualizer = simulationManager.GetComponent<PlanningMapVisualizer>();
+            if (planningMapVisualizer == null)
+            {
+                planningMapVisualizer = simulationManager.gameObject.AddComponent<PlanningMapVisualizer>();
+            }
+
+            simulationManager.planningMapVisualizer = planningMapVisualizer;
+            RuntimeSceneRegistry.Register(planningMapVisualizer);
+        }
+
+        if (planningMapVisualizer == null)
+        {
+            return false;
+        }
+
+        if (planningMapVisualizer.droneManager == null)
+        {
+            planningMapVisualizer.droneManager = droneManager;
+        }
+
+        return true;
+    }
+
     private void LoadRLTrainingScene()
     {
         if (simulationManager != null && simulationManager.currentState != SimulationState.Idle)

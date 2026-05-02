@@ -20,6 +20,7 @@ public partial class SimulationRuntimeControlPanel : MonoBehaviour
     public RuntimeObstacleEditor obstacleEditor;
     public AlgorithmVisualizerManager algorithmVisualizerManager;
     public TaskQueueVisualizer taskQueueVisualizer;
+    public PlanningMapVisualizer planningMapVisualizer;
     public RLMapExporter rlMapExporter;
     public RLPathResultImporter rlPathResultImporter;
     public RLMapObstacleVisualizer rlMapObstacleVisualizer;
@@ -40,8 +41,8 @@ public partial class SimulationRuntimeControlPanel : MonoBehaviour
     private const float MinPlanningGridCellSize = 0.5f;
     private const float MaxPlanningGridCellSize = 8f;
     private const float PlanningGridCellSizeStep = 0.5f;
-    private const float MinPlanningBoundary = -200f;
-    private const float MaxPlanningBoundary = 200f;
+    private const float MinPlanningBoundary = -1000f;
+    private const float MaxPlanningBoundary = 1000f;
     private const float PlanningBoundaryStep = 2f;
     private const float MinPlanningHeight = -20f;
     private const float MaxPlanningHeight = 120f;
@@ -299,6 +300,10 @@ public partial class SimulationRuntimeControlPanel : MonoBehaviour
         taskQueueVisualizer = RuntimeSceneRegistry.Resolve(
             taskQueueVisualizer,
             simulationManager != null ? simulationManager.taskQueueVisualizer : null,
+            this);
+        planningMapVisualizer = RuntimeSceneRegistry.Resolve(
+            planningMapVisualizer,
+            simulationManager != null ? simulationManager.planningMapVisualizer : null,
             this);
         rlMapExporter = RuntimeSceneRegistry.Resolve(
             rlMapExporter,
