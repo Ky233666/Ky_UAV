@@ -21,6 +21,7 @@ public partial class SimulationRuntimeControlPanel : MonoBehaviour
     public AlgorithmVisualizerManager algorithmVisualizerManager;
     public TaskQueueVisualizer taskQueueVisualizer;
     public PlanningMapVisualizer planningMapVisualizer;
+    public PlanningBoundsSelector planningBoundsSelector;
     public RLMapExporter rlMapExporter;
     public RLPathResultImporter rlPathResultImporter;
     public RLMapObstacleVisualizer rlMapObstacleVisualizer;
@@ -93,10 +94,6 @@ public partial class SimulationRuntimeControlPanel : MonoBehaviour
     private TMP_Text droneSpeedValueText;
     private TMP_Text timeScaleValueText;
     private TMP_Text planningGridValueText;
-    private TMP_Text planningMinXValueText;
-    private TMP_Text planningMaxXValueText;
-    private TMP_Text planningMinZValueText;
-    private TMP_Text planningMaxZValueText;
     private TMP_Text planningMinYValueText;
     private TMP_Text planningMaxYValueText;
     private TMP_Text rlCaseValueText;
@@ -107,10 +104,10 @@ public partial class SimulationRuntimeControlPanel : MonoBehaviour
     private TMP_Text obstacleScaleValueText;
     private TMP_Text exportDirectoryStatusText;
     private TMP_Text batchRunCountValueText;
-    private TMP_Text batchStatusText;
-    private TMP_Text experimentGroupValueText;
-    private TMP_Text experimentPresetValueText;
-    private TMP_Text experimentPresetSummaryText;
+    private TMP_Text batchStatusText = null;
+    private TMP_Text experimentGroupValueText = null;
+    private TMP_Text experimentPresetValueText = null;
+    private TMP_Text experimentPresetSummaryText = null;
     private TMP_Text summaryText;
     private TMP_Text statsText;
     private TMP_Text footerText;
@@ -131,6 +128,7 @@ public partial class SimulationRuntimeControlPanel : MonoBehaviour
     private Button trailToggleButton;
     private Button diagonalPlanningToggleButton;
     private Button obstacleAutoConfigToggleButton;
+    private Button planningBoundsSelectionButton;
     private Button taskQueueVisualizationToggleButton;
     private Button visualizationObstacleTransparencyToggleButton;
     private Button visualizationPlayButton;
@@ -139,6 +137,7 @@ public partial class SimulationRuntimeControlPanel : MonoBehaviour
     private Button visualizationResetButton;
     private SimulationContext simulationContext;
     private bool isExpanded;
+    private bool wasPlanningBoundsSelecting;
     private float nextSummaryRefreshTime;
     private Vector2 lastCanvasSize;
 
@@ -305,6 +304,7 @@ public partial class SimulationRuntimeControlPanel : MonoBehaviour
             planningMapVisualizer,
             simulationManager != null ? simulationManager.planningMapVisualizer : null,
             this);
+        planningBoundsSelector = RuntimeSceneRegistry.Resolve(planningBoundsSelector, this);
         rlMapExporter = RuntimeSceneRegistry.Resolve(
             rlMapExporter,
             simulationManager != null ? simulationManager.rlMapExporter : null,

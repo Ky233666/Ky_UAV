@@ -215,24 +215,7 @@ public partial class SimulationRuntimeControlPanel
         RectTransform statsSection = CreateSectionCard(content, "统计概览", "实时摘要与单机运行状态。");
         CreateInfoCard(statsSection, "Stats", out statsText, out statsCardLayoutElement, StatsCardMinHeight);
 
-        RectTransform experimentSection = CreateSectionCard(content, "实验中心", "预设矩阵、快速应用与批量运行。");
-        CreateStepperRow(experimentSection, "分组", out experimentGroupValueText, OnPreviousExperimentGroupClicked, OnNextExperimentGroupClicked, 148f);
-        CreateStepperRow(experimentSection, "预设", out experimentPresetValueText, OnPreviousExperimentPresetClicked, OnNextExperimentPresetClicked, 164f);
-        CreateButtonStripRow(experimentSection, "实验矩阵", new[]
-        {
-            new ButtonAction("调度", new Color(0.14f, 0.44f, 0.70f, 0.98f), SelectSchedulingExperimentGroup, 48f),
-            new ButtonAction("规划", new Color(0.16f, 0.48f, 0.66f, 0.98f), SelectPlanningExperimentGroup, 48f),
-            new ButtonAction("机群", new Color(0.18f, 0.40f, 0.62f, 0.98f), SelectScalingExperimentGroup, 48f),
-            new ButtonAction("密度", new Color(0.12f, 0.36f, 0.54f, 0.98f), SelectDensityExperimentGroup, 48f)
-        });
-        CreateInfoCard(experimentSection, "ExperimentPresetSummary", out experimentPresetSummaryText, out _, 112f);
-        CreateButtonStripRow(experimentSection, "实验执行", new[]
-        {
-            new ButtonAction("应用预设", SecondaryButtonColor, ApplySelectedExperimentPreset, 72f),
-            new ButtonAction("预设批量", PrimaryButtonColor, StartSelectedPresetBatch, 72f)
-        });
-
-        RectTransform resultSection = CreateSectionCard(content, "结果与导出", "导出目录、会话管理和当前批量状态。");
+        RectTransform resultSection = CreateSectionCard(content, "结果与导出", "导出目录、会话管理和当前仿真结果。");
         CreateInfoCard(resultSection, "ExportDirectory", out exportDirectoryStatusText, out _, 96f);
         CreateInputButtonRow(resultSection, "目录", out exportDirectoryInputField, new[]
         {
@@ -246,14 +229,6 @@ public partial class SimulationRuntimeControlPanel
             new ButtonAction("导出CSV", PrimaryButtonColor, ExportCurrentResultToCsv, 68f),
             new ButtonAction("导出JSON", new Color(0.08f, 0.48f, 0.62f, 0.98f), ExportCurrentResultToJson, 74f)
         });
-        CreateInfoCard(resultSection, "BatchStatus", out batchStatusText, out _, 72f);
-        CreateStepperRow(resultSection, "批次数", out batchRunCountValueText, OnDecreaseBatchRunCountClicked, OnIncreaseBatchRunCountClicked);
-        CreateButtonStripRow(resultSection, "批量实验", new[]
-        {
-            new ButtonAction("开始", PrimaryButtonColor, StartBatchExperiments, 56f),
-            new ButtonAction("停止", SecondaryButtonColor, StopBatchExperiments, 56f)
-        });
-
         RectTransform spawnSection = CreateSectionCard(content, "起飞点", "新增、移动和删除起飞位置。");
         CreateButtonStripRow(spawnSection, "编辑模式", new[]
         {
@@ -280,16 +255,13 @@ public partial class SimulationRuntimeControlPanel
         CreateStepperRow(obstacleSection, "缩放", out obstacleScaleValueText, OnDecreaseObstacleScaleClicked, OnIncreaseObstacleScaleClicked, 108f);
         CreateStepperRow(obstacleSection, "高度", out obstacleHeightValueText, OnDecreaseObstacleHeightClicked, OnIncreaseObstacleHeightClicked, 108f);
 
-        RectTransform algorithmSection = CreateSectionCard(content, "算法与规划", "调度、路径规划和搜索边界。");
+        RectTransform algorithmSection = CreateSectionCard(content, "算法与规划", "调度、路径规划、地图框选和障碍检测高度。");
         CreateStepperRow(algorithmSection, "调度", out schedulerValueText, OnPreviousSchedulerClicked, OnNextSchedulerClicked, 124f);
         CreateStepperRow(algorithmSection, "路径", out plannerValueText, OnPreviousPlannerClicked, OnNextPlannerClicked, 124f);
         CreateStepperRow(algorithmSection, "网格", out planningGridValueText, OnDecreasePlanningGridClicked, OnIncreasePlanningGridClicked);
-        CreateStepperRow(algorithmSection, "X最小", out planningMinXValueText, OnDecreasePlanningMinXClicked, OnIncreasePlanningMinXClicked);
-        CreateStepperRow(algorithmSection, "X最大", out planningMaxXValueText, OnDecreasePlanningMaxXClicked, OnIncreasePlanningMaxXClicked);
-        CreateStepperRow(algorithmSection, "Z最小", out planningMinZValueText, OnDecreasePlanningMinZClicked, OnIncreasePlanningMinZClicked);
-        CreateStepperRow(algorithmSection, "Z最大", out planningMaxZValueText, OnDecreasePlanningMaxZClicked, OnIncreasePlanningMaxZClicked);
-        CreateStepperRow(algorithmSection, "检测低", out planningMinYValueText, OnDecreasePlanningMinYClicked, OnIncreasePlanningMinYClicked);
-        CreateStepperRow(algorithmSection, "检测高", out planningMaxYValueText, OnDecreasePlanningMaxYClicked, OnIncreasePlanningMaxYClicked);
+        CreateToggleRow(algorithmSection, "框选地图", out planningBoundsSelectionButton, TogglePlanningBoundsSelection);
+        CreateStepperRow(algorithmSection, "障碍Y底", out planningMinYValueText, OnDecreasePlanningMinYClicked, OnIncreasePlanningMinYClicked);
+        CreateStepperRow(algorithmSection, "障碍Y顶", out planningMaxYValueText, OnDecreasePlanningMaxYClicked, OnIncreasePlanningMaxYClicked);
         CreateToggleRow(algorithmSection, "对角搜索", out diagonalPlanningToggleButton, ToggleDiagonalPlanning);
         CreateToggleRow(algorithmSection, "障碍自动", out obstacleAutoConfigToggleButton, ToggleObstacleAutoConfiguration);
         CreateButtonStripRow(algorithmSection, "规划地图", new[]

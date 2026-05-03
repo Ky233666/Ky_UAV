@@ -170,6 +170,7 @@ public partial class SimulationRuntimeControlPanel
             return;
         }
 
+        droneManager.autoFitPlanningBoundsToScene = true;
         bool changed = droneManager.FitPlanningBoundsToCurrentScene();
         configuredPlanningMinX = droneManager.planningWorldMin.x;
         configuredPlanningMaxX = droneManager.planningWorldMax.x;
@@ -189,6 +190,77 @@ public partial class SimulationRuntimeControlPanel
             : "当前规划边界已经覆盖无人机、任务点和相关障碍物";
         RefreshAllLabels();
         RefreshSummary();
+    }
+
+    private void TogglePlanningBoundsSelection()
+    {
+        if (!EnsurePlanningBoundsSelector())
+        {
+            transientMessage = "未找到规划范围框选组件";
+            RefreshAllLabels();
+            return;
+        }
+
+        bool willStartSelection = !planningBoundsSelector.IsSelecting;
+        if (willStartSelection)
+        {
+            ExitSceneEditModesBeforeBoundsSelection();
+            EnsurePlanningMapVisualizer();
+            planningBoundsSelector.planningMapVisualizer = planningMapVisualizer;
+        }
+
+        planningBoundsSelector.ToggleSelection();
+        if (planningBoundsSelector.IsSelecting)
+        {
+            if (EnsurePlanningMapVisualizer())
+            {
+                planningMapVisualizer.SetBoundsVisible(true);
+            }
+
+            transientMessage = "已进入地图范围框选模式，按住左键拖拽地面确定规划区域";
+        }
+        else
+        {
+            SyncPlanningBoundsFromManager();
+            transientMessage = planningBoundsSelector.LastMessage;
+        }
+
+        RefreshAllLabels();
+        RefreshSummary();
+    }
+
+    private void ExitSceneEditModesBeforeBoundsSelection()
+    {
+        if (spawnPointManager != null)
+        {
+            if (spawnPointManager.IsPlacementMode)
+            {
+                spawnPointManager.TogglePlacementMode();
+            }
+
+            if (spawnPointManager.IsDeleteMode)
+            {
+                spawnPointManager.ToggleDeleteMode();
+            }
+
+            if (spawnPointManager.IsMoveMode)
+            {
+                spawnPointManager.ToggleMoveMode();
+            }
+        }
+
+        if (obstacleEditor != null)
+        {
+            if (obstacleEditor.IsCreateMode)
+            {
+                obstacleEditor.ToggleCreateMode();
+            }
+
+            if (obstacleEditor.IsDeleteMode)
+            {
+                obstacleEditor.ToggleDeleteMode();
+            }
+        }
     }
 
     private void TogglePlanningBoundsPreview()
@@ -255,6 +327,51 @@ public partial class SimulationRuntimeControlPanel
         return true;
     }
 
+    private bool EnsurePlanningBoundsSelector()
+    {
+        if (planningBoundsSelector == null)
+        {
+            planningBoundsSelector = RuntimeSceneRegistry.Get<PlanningBoundsSelector>(this);
+        }
+
+        if (planningBoundsSelector == null && simulationManager != null)
+        {
+            planningBoundsSelector = simulationManager.GetComponent<PlanningBoundsSelector>();
+            if (planningBoundsSelector == null)
+            {
+                planningBoundsSelector = simulationManager.gameObject.AddComponent<PlanningBoundsSelector>();
+            }
+
+            RuntimeSceneRegistry.Register(planningBoundsSelector);
+        }
+
+        if (planningBoundsSelector == null)
+        {
+            return false;
+        }
+
+        planningBoundsSelector.simulationManager = simulationManager;
+        planningBoundsSelector.droneManager = droneManager;
+        planningBoundsSelector.cameraManager = cameraManager;
+        planningBoundsSelector.planningMapVisualizer = planningMapVisualizer;
+        return true;
+    }
+
+    private void SyncPlanningBoundsFromManager()
+    {
+        if (droneManager == null)
+        {
+            return;
+        }
+
+        configuredPlanningMinX = droneManager.planningWorldMin.x;
+        configuredPlanningMaxX = droneManager.planningWorldMax.x;
+        configuredPlanningMinZ = droneManager.planningWorldMin.z;
+        configuredPlanningMaxZ = droneManager.planningWorldMax.z;
+        configuredPlanningMinY = droneManager.planningWorldMin.y;
+        configuredPlanningMaxY = droneManager.planningWorldMax.y;
+    }
+
     private void LoadRLTrainingScene()
     {
         if (simulationManager != null && simulationManager.currentState != SimulationState.Idle)
@@ -284,6 +401,11 @@ public partial class SimulationRuntimeControlPanel
         configuredPlanningMaxY = 12f;
         configuredAllowDiagonalPlanning = false;
         configuredAutoConfigureObstacles = true;
+        if (droneManager != null)
+        {
+            droneManager.autoFitPlanningBoundsToScene = false;
+        }
+
         ApplyPlanningSettings();
         transientMessage = "已应用 RL 小地图: 约 31x31 网格，可在该范围内绘制障碍并导出";
         RefreshAllLabels();
@@ -966,7 +1088,7 @@ public partial class SimulationRuntimeControlPanel
         }
 
         transientMessage =
-            $"规划 网格{configuredPlanningGridCellSize:0.0}m 边界X[{configuredPlanningMinX:0},{configuredPlanningMaxX:0}] Z[{configuredPlanningMinZ:0},{configuredPlanningMaxZ:0}] 检测Y[{configuredPlanningMinY:0},{configuredPlanningMaxY:0}]";
+            $"规划地图 网格{configuredPlanningGridCellSize:0.0}m X[{configuredPlanningMinX:0},{configuredPlanningMaxX:0}] Z[{configuredPlanningMinZ:0},{configuredPlanningMaxZ:0}] 障碍检测Y[{configuredPlanningMinY:0},{configuredPlanningMaxY:0}]";
         RefreshAllLabels();
         RefreshSummary();
     }

@@ -98,13 +98,13 @@ public partial class SimulationRuntimeControlPanel
             configuredBatchRunCount = Mathf.Clamp(batchExperimentRunner.batchRunCount, MinBatchRunCount, MaxBatchRunCount);
         }
 
-        EnsureExperimentPresetCatalogLoaded();
-        SyncExperimentSelectionFromSystems();
         RefreshExportDirectoryUi(true);
     }
 
     private void RefreshAllLabels()
     {
+        RefreshPlanningBoundsSelectionState();
+
         if (schedulerValueText != null)
         {
             schedulerValueText.text = FormatSchedulerName(schedulerOptions[schedulerIndex]);
@@ -128,26 +128,6 @@ public partial class SimulationRuntimeControlPanel
         if (planningGridValueText != null)
         {
             planningGridValueText.text = $"{configuredPlanningGridCellSize:0.0}m";
-        }
-
-        if (planningMinXValueText != null)
-        {
-            planningMinXValueText.text = configuredPlanningMinX.ToString("0");
-        }
-
-        if (planningMaxXValueText != null)
-        {
-            planningMaxXValueText.text = configuredPlanningMaxX.ToString("0");
-        }
-
-        if (planningMinZValueText != null)
-        {
-            planningMinZValueText.text = configuredPlanningMinZ.ToString("0");
-        }
-
-        if (planningMaxZValueText != null)
-        {
-            planningMaxZValueText.text = configuredPlanningMaxZ.ToString("0");
         }
 
         if (planningMinYValueText != null)
@@ -198,16 +178,13 @@ public partial class SimulationRuntimeControlPanel
             obstacleStyleValueText.text = configuredObstacleTemplateName;
         }
 
-        if (batchRunCountValueText != null)
-        {
-            batchRunCountValueText.text = configuredBatchRunCount.ToString();
-        }
-
-        RefreshExperimentCenterLabels();
         UpdateToggleButton(plannedPathToggleButton, showPlannedPath);
         UpdateToggleButton(trailToggleButton, showTrail);
         UpdateToggleButton(diagonalPlanningToggleButton, configuredAllowDiagonalPlanning);
         UpdateToggleButton(obstacleAutoConfigToggleButton, configuredAutoConfigureObstacles);
+        UpdateToggleButton(
+            planningBoundsSelectionButton,
+            planningBoundsSelector != null && planningBoundsSelector.IsSelecting);
         UpdateToggleButton(
             taskQueueVisualizationToggleButton,
             taskQueueVisualizer != null && taskQueueVisualizer.ShowTaskQueues);
@@ -222,7 +199,7 @@ public partial class SimulationRuntimeControlPanel
 
         if (footerText != null)
         {
-            footerText.text = $"{transientMessage}  |  F5开始/继续 F6暂停 F7重置 F8重建 F9演示播放 F10退出 F11演示单步 F12演示重置 Ctrl+Shift+C/J/B/X 导出/批量";
+            footerText.text = $"{transientMessage}  |  F5开始/继续 F6暂停 F7重置 F8重建 F9演示播放 F10退出 F11演示单步 F12演示重置 Ctrl+Shift+C/J/N 导出/新会话";
         }
 
         RefreshVisualizationPanel();
@@ -230,6 +207,21 @@ public partial class SimulationRuntimeControlPanel
         RefreshEvaluationPanel();
         RefreshExportDirectoryUi(false);
         RefreshBatchStatus();
+    }
+
+    private void RefreshPlanningBoundsSelectionState()
+    {
+        bool isSelecting = planningBoundsSelector != null && planningBoundsSelector.IsSelecting;
+        if (wasPlanningBoundsSelecting && !isSelecting && planningBoundsSelector != null)
+        {
+            SyncPlanningBoundsFromManager();
+            if (!string.IsNullOrWhiteSpace(planningBoundsSelector.LastMessage))
+            {
+                transientMessage = planningBoundsSelector.LastMessage;
+            }
+        }
+
+        wasPlanningBoundsSelecting = isSelecting;
     }
 
     private void RefreshSummary()
@@ -650,18 +642,6 @@ public partial class SimulationRuntimeControlPanel
             if (Input.GetKeyDown(KeyCode.J))
             {
                 ExportCurrentResultToJson();
-                return;
-            }
-
-            if (Input.GetKeyDown(KeyCode.B))
-            {
-                StartBatchExperiments();
-                return;
-            }
-
-            if (Input.GetKeyDown(KeyCode.X))
-            {
-                StopBatchExperiments();
                 return;
             }
 

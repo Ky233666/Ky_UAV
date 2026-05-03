@@ -8,7 +8,12 @@ using UnityEngine;
 /// </summary>
 public class AlgorithmVisualizerManager : MonoBehaviour
 {
-    private static readonly float[] PlaybackSpeedOptions = { 0.5f, 1f, 2f, 5f };
+    private static readonly float[] PlaybackSpeedOptions = { 0.1f, 0.25f, 0.5f, 1f, 2f };
+    private static readonly PathPlanningVisualizationMode[] PlaybackModeOptions =
+    {
+        PathPlanningVisualizationMode.FullProcess,
+        PathPlanningVisualizationMode.FinalResultOnly
+    };
     private static readonly Color[] DroneAccentPalette =
     {
         new Color(0.20f, 0.86f, 1.00f, 1f),
@@ -28,24 +33,27 @@ public class AlgorithmVisualizerManager : MonoBehaviour
 
     [Header("Playback")]
     public PathPlanningVisualizationMode visualizationMode = PathPlanningVisualizationMode.FullProcess;
-    public float playbackSpeed = 1f;
+    public float playbackSpeed = 0.5f;
     public bool autoSelectLatestTrace = true;
     public bool autoplayOnNewTrace = false;
-    public float baseSecondsPerStep = 0.18f;
+    public float baseSecondsPerStep = 0.35f;
     public bool capturePlanningTraces = true;
     public bool recordAllDroneTraces = false;
+    public bool captureAllTaskSegmentsForSelectedDrone = true;
     public int maxRecordedStepsPerTrace = 2000;
 
     [Header("Visibility Aid")]
     public bool obstacleTransparencyEnabled = true;
 
-    private readonly Dictionary<int, PathPlanningVisualizationTrace> tracesByDroneId = new Dictionary<int, PathPlanningVisualizationTrace>();
-    private readonly List<int> playbackSequence = new List<int>();
+    private readonly Dictionary<int, List<PathPlanningVisualizationTrace>> tracesByDroneId =
+        new Dictionary<int, List<PathPlanningVisualizationTrace>>();
+    private readonly List<PlaybackStepRef> playbackSequence = new List<PlaybackStepRef>();
     private readonly PlaybackRuntimeState runtimeState = new PlaybackRuntimeState();
 
     private int selectedDroneId = -1;
     private int currentSequenceCursor = -1;
     private int appliedUnderlyingStepIndex = -1;
+    private int appliedTraceIndex = -1;
     private float playbackTimer;
     private PathPlanningVisualizationPlaybackState playbackState = PathPlanningVisualizationPlaybackState.Ready;
 
@@ -84,7 +92,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
             return;
         }
 
-        PathPlanningVisualizationTrace trace = GetActiveTrace();
+        PathPlanningVisualizationTrace trace = GetCurrentPlaybackTrace();
         if (trace == null || playbackSequence.Count == 0)
         {
             playbackState = PathPlanningVisualizationPlaybackState.Ready;
@@ -162,6 +170,11 @@ public class AlgorithmVisualizerManager : MonoBehaviour
             return selectedDroneId == droneId || !HasPlayableTrace();
         }
 
+        if (captureAllTaskSegmentsForSelectedDrone && HasTraceForDrone(droneId))
+        {
+            return true;
+        }
+
         return tracesByDroneId.Count == 0;
     }
 
@@ -172,7 +185,8 @@ public class AlgorithmVisualizerManager : MonoBehaviour
             return;
         }
 
-        tracesByDroneId[trace.droneId] = trace;
+        List<PathPlanningVisualizationTrace> traces = GetOrCreateTraceList(trace.droneId);
+        traces.Add(trace);
 
         if (autoSelectLatestTrace || selectedDroneId < 0 || !HasTraceForDrone(selectedDroneId))
         {
@@ -186,7 +200,11 @@ public class AlgorithmVisualizerManager : MonoBehaviour
             return;
         }
 
-        ResetPlayback();
+        if (playbackState != PathPlanningVisualizationPlaybackState.Playing)
+        {
+            ResetPlayback();
+        }
+
         if (autoplayOnNewTrace)
         {
             Play();
@@ -258,6 +276,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
         playbackTimer = 0f;
         currentSequenceCursor = -1;
         appliedUnderlyingStepIndex = -1;
+        appliedTraceIndex = -1;
         playbackState = PathPlanningVisualizationPlaybackState.Ready;
         runtimeState.Reset();
         RefreshRenderer();
@@ -314,17 +333,17 @@ public class AlgorithmVisualizerManager : MonoBehaviour
 
     public void SelectPreviousMode()
     {
-        int count = System.Enum.GetValues(typeof(PathPlanningVisualizationMode)).Length;
-        int nextMode = ((int)visualizationMode - 1 + count) % count;
-        visualizationMode = (PathPlanningVisualizationMode)nextMode;
+        int index = ResolvePlaybackModeIndex();
+        index = (index - 1 + PlaybackModeOptions.Length) % PlaybackModeOptions.Length;
+        visualizationMode = PlaybackModeOptions[index];
         OnPlaybackModeChanged();
     }
 
     public void SelectNextMode()
     {
-        int count = System.Enum.GetValues(typeof(PathPlanningVisualizationMode)).Length;
-        int nextMode = ((int)visualizationMode + 1) % count;
-        visualizationMode = (PathPlanningVisualizationMode)nextMode;
+        int index = ResolvePlaybackModeIndex();
+        index = (index + 1) % PlaybackModeOptions.Length;
+        visualizationMode = PlaybackModeOptions[index];
         OnPlaybackModeChanged();
     }
 
@@ -344,8 +363,21 @@ public class AlgorithmVisualizerManager : MonoBehaviour
 
     public bool HasPlayableTrace()
     {
-        PathPlanningVisualizationTrace trace = GetActiveTrace();
-        return trace != null && trace.HasSteps();
+        List<PathPlanningVisualizationTrace> traces = GetActiveTraceList();
+        if (traces == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < traces.Count; i++)
+        {
+            if (traces[i] != null && traces[i].HasSteps())
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public void SetObstacleTransparencyEnabled(bool enabled)
@@ -386,12 +418,11 @@ public class AlgorithmVisualizerManager : MonoBehaviour
 
     public string GetModeDisplayName()
     {
+        NormalizePlaybackMode();
         switch (visualizationMode)
         {
             case PathPlanningVisualizationMode.FinalResultOnly:
                 return "仅最终结果";
-            case PathPlanningVisualizationMode.KeyMoments:
-                return "关键步骤";
             case PathPlanningVisualizationMode.FullProcess:
             default:
                 return "完整过程";
@@ -421,13 +452,13 @@ public class AlgorithmVisualizerManager : MonoBehaviour
 
     public string GetCurrentAlgorithmLabel()
     {
-        PathPlanningVisualizationTrace trace = GetActiveTrace();
+        PathPlanningVisualizationTrace trace = GetCurrentPlaybackTrace();
         if (trace == null)
         {
             return "未生成规划轨迹";
         }
 
-        return $"{trace.plannerDisplayName} / {trace.plannerName}";
+        return $"{trace.plannerDisplayName} / {trace.plannerName}  {GetCurrentSegmentLabel()}";
     }
 
     public string GetCurrentStepLabel()
@@ -443,7 +474,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
 
     public string GetStatusText()
     {
-        PathPlanningVisualizationTrace trace = GetActiveTrace();
+        PathPlanningVisualizationTrace trace = GetCurrentPlaybackTrace();
         if (trace == null)
         {
             return "算法: 等待规划\n步骤: 0 / 0\n状态: 暂无轨迹";
@@ -451,6 +482,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
 
         StringBuilder builder = new StringBuilder();
         builder.Append("算法: ").Append(trace.plannerDisplayName)
+            .Append("\n段落: ").Append(GetCurrentSegmentLabel())
             .Append("\n步骤: ").Append(GetCurrentStepLabel())
             .Append("\n状态: ").Append(GetPlaybackStateLabel())
             .Append("\n前沿: ").Append(runtimeState.CountNodes(PathPlanningVisualizationNodeRole.Frontier))
@@ -472,7 +504,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
 
     public string GetCurrentDescription()
     {
-        PathPlanningVisualizationTrace trace = GetActiveTrace();
+        PathPlanningVisualizationTrace trace = GetCurrentPlaybackTrace();
         if (trace == null)
         {
             return "当前还没有可播放的规划过程。开始仿真或触发重新规划后，面板会记录最近一次搜索过程。";
@@ -550,6 +582,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
 
     private void OnPlaybackModeChanged()
     {
+        NormalizePlaybackMode();
         RebuildPlaybackSequence();
         ShowCurrentModeDefault();
     }
@@ -560,7 +593,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
 
         if (visualizationMode == PathPlanningVisualizationMode.FinalResultOnly && playbackSequence.Count > 0)
         {
-            AdvanceToSequenceCursor(0);
+            ApplyAggregateFinalResult();
             playbackState = PathPlanningVisualizationPlaybackState.Completed;
             ApplyObstacleTransparencyState();
         }
@@ -600,13 +633,26 @@ public class AlgorithmVisualizerManager : MonoBehaviour
 
     private void AdvanceToSequenceCursor(int targetCursor)
     {
-        PathPlanningVisualizationTrace trace = GetActiveTrace();
-        if (trace == null || targetCursor < 0 || targetCursor >= playbackSequence.Count)
+        if (targetCursor < 0 || targetCursor >= playbackSequence.Count)
         {
             return;
         }
 
-        int targetUnderlyingStep = playbackSequence[targetCursor];
+        PlaybackStepRef stepRef = playbackSequence[targetCursor];
+        PathPlanningVisualizationTrace trace = GetTraceAt(stepRef.traceIndex);
+        if (trace == null || stepRef.stepIndex < 0 || stepRef.stepIndex >= trace.steps.Count)
+        {
+            return;
+        }
+
+        if (appliedTraceIndex != stepRef.traceIndex || targetCursor < currentSequenceCursor)
+        {
+            runtimeState.Reset();
+            appliedUnderlyingStepIndex = -1;
+            appliedTraceIndex = stepRef.traceIndex;
+        }
+
+        int targetUnderlyingStep = stepRef.stepIndex;
         for (int i = appliedUnderlyingStepIndex + 1; i <= targetUnderlyingStep; i++)
         {
             ApplyStep(trace.steps[i]);
@@ -619,53 +665,287 @@ public class AlgorithmVisualizerManager : MonoBehaviour
 
     private void ApplyStep(PathPlanningVisualizationStep step)
     {
-        if (step == null)
+        ApplyStepToState(runtimeState, step);
+    }
+
+    private static void ApplyStepToState(PlaybackRuntimeState targetState, PathPlanningVisualizationStep step)
+    {
+        if (targetState == null || step == null)
         {
             return;
         }
 
-        runtimeState.description = step.description;
+        targetState.description = step.description;
 
         if (step.clearRejectedEdges)
         {
-            runtimeState.ClearRejectedEdges();
+            targetState.ClearRejectedEdges();
         }
 
         if (ContainsCurrentNodeUpdate(step))
         {
-            runtimeState.DemoteCurrentNodesToVisited();
+            targetState.DemoteCurrentNodesToVisited();
         }
 
         for (int i = 0; i < step.nodeUpdates.Count; i++)
         {
-            runtimeState.SetNode(step.nodeUpdates[i]);
+            targetState.SetNode(step.nodeUpdates[i]);
         }
 
         for (int i = 0; i < step.edgeUpdates.Count; i++)
         {
-            runtimeState.SetEdge(step.edgeUpdates[i]);
+            targetState.SetEdge(step.edgeUpdates[i]);
         }
 
         if (step.replaceCandidatePath)
         {
-            runtimeState.candidatePath = new List<Vector3>(step.candidatePath);
+            targetState.candidatePath = new List<Vector3>(step.candidatePath);
         }
 
         if (step.replaceBacktrackPath)
         {
-            runtimeState.backtrackPath = new List<Vector3>(step.backtrackPath);
+            targetState.backtrackPath = new List<Vector3>(step.backtrackPath);
         }
 
         if (step.replaceFinalPath)
         {
-            runtimeState.finalPath = new List<Vector3>(step.finalPath);
+            targetState.finalPath = new List<Vector3>(step.finalPath);
         }
 
         if (step.markSearchComplete)
         {
-            runtimeState.searchComplete = true;
-            runtimeState.searchSucceeded = step.markSearchSucceeded;
+            targetState.searchComplete = true;
+            targetState.searchSucceeded = step.markSearchSucceeded;
         }
+    }
+
+    private void ApplyAggregateFinalResult()
+    {
+        List<PathPlanningVisualizationTrace> traces = GetActiveTraceList();
+        if (traces == null || traces.Count == 0)
+        {
+            return;
+        }
+
+        runtimeState.Reset();
+        int playableSegmentCount = 0;
+        for (int traceIndex = 0; traceIndex < traces.Count; traceIndex++)
+        {
+            PathPlanningVisualizationTrace trace = traces[traceIndex];
+            if (trace == null || !trace.HasSteps())
+            {
+                continue;
+            }
+
+            PlaybackRuntimeState segmentFinalState = BuildFinalStateForTrace(trace);
+            runtimeState.MergeFrom(segmentFinalState, copyTransientPaths: true);
+            playableSegmentCount++;
+        }
+
+        List<Vector3> fullPath = BuildAggregateFinalPath(traces);
+        if (fullPath.Count >= 2)
+        {
+            runtimeState.finalPath = fullPath;
+            runtimeState.SetNode(PathPlanningVisualizationBuilder.CreateNode(
+                fullPath[0],
+                PathPlanningVisualizationNodeRole.Start,
+                label: "S"));
+            runtimeState.SetNode(PathPlanningVisualizationBuilder.CreateNode(
+                fullPath[fullPath.Count - 1],
+                PathPlanningVisualizationNodeRole.Goal,
+                label: "G"));
+        }
+
+        ApplyAggregateWaypointNodes(traces, fullPath);
+
+        runtimeState.searchComplete = true;
+        runtimeState.searchSucceeded = fullPath.Count >= 2 && AreAllPlayableTracesSuccessful(traces);
+        runtimeState.description = fullPath.Count >= 2
+            ? $"已快进并定格 {playableSegmentCount} 段规划过程的最后状态，显示最终采样/扩展/拒绝痕迹，并叠加从起飞点到最后任务点的完整路径。"
+            : "当前还没有可显示的完整最终路径。";
+
+        currentSequenceCursor = playbackSequence.Count > 0 ? playbackSequence.Count - 1 : -1;
+        appliedUnderlyingStepIndex = -1;
+        appliedTraceIndex = ResolveCurrentTraceIndex();
+        RefreshRenderer();
+    }
+
+    private static PlaybackRuntimeState BuildFinalStateForTrace(PathPlanningVisualizationTrace trace)
+    {
+        PlaybackRuntimeState finalState = new PlaybackRuntimeState();
+        if (trace == null || !trace.HasSteps())
+        {
+            return finalState;
+        }
+
+        for (int i = 0; i < trace.steps.Count; i++)
+        {
+            ApplyStepToState(finalState, trace.steps[i]);
+        }
+
+        return finalState;
+    }
+
+    private void ApplyAggregateWaypointNodes(
+        List<PathPlanningVisualizationTrace> traces,
+        List<Vector3> fullPath)
+    {
+        int playableCount = CountPlayableTraces(traces);
+        int segmentNumber = 0;
+        bool startMarked = false;
+
+        if (traces != null)
+        {
+            for (int i = 0; i < traces.Count; i++)
+            {
+                PathPlanningVisualizationTrace trace = traces[i];
+                if (trace == null || !trace.HasSteps())
+                {
+                    continue;
+                }
+
+                segmentNumber++;
+                if (!startMarked && TryResolveTraceStart(trace, out Vector3 startPosition))
+                {
+                    runtimeState.SetNode(PathPlanningVisualizationBuilder.CreateNode(
+                        startPosition,
+                        PathPlanningVisualizationNodeRole.Start,
+                        label: "S"));
+                    startMarked = true;
+                }
+
+                if (TryResolveTraceGoal(trace, out Vector3 goalPosition))
+                {
+                    runtimeState.SetNode(PathPlanningVisualizationBuilder.CreateNode(
+                        goalPosition,
+                        PathPlanningVisualizationNodeRole.Goal,
+                        label: segmentNumber == playableCount ? "G" : $"T{segmentNumber}"));
+                }
+            }
+        }
+
+        if (fullPath == null || fullPath.Count < 2)
+        {
+            return;
+        }
+
+        if (!startMarked)
+        {
+            runtimeState.SetNode(PathPlanningVisualizationBuilder.CreateNode(
+                fullPath[0],
+                PathPlanningVisualizationNodeRole.Start,
+                label: "S"));
+        }
+
+        runtimeState.SetNode(PathPlanningVisualizationBuilder.CreateNode(
+            fullPath[fullPath.Count - 1],
+            PathPlanningVisualizationNodeRole.Goal,
+            label: "G"));
+    }
+
+    private static bool TryResolveTraceStart(PathPlanningVisualizationTrace trace, out Vector3 position)
+    {
+        position = Vector3.zero;
+        if (trace == null)
+        {
+            return false;
+        }
+
+        if (trace.request != null)
+        {
+            position = trace.request.startPosition;
+            return true;
+        }
+
+        if (trace.finalPath != null && trace.finalPath.Count > 0)
+        {
+            position = trace.finalPath[0];
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryResolveTraceGoal(PathPlanningVisualizationTrace trace, out Vector3 position)
+    {
+        position = Vector3.zero;
+        if (trace == null)
+        {
+            return false;
+        }
+
+        if (trace.request != null)
+        {
+            position = trace.request.targetPosition;
+            return true;
+        }
+
+        if (trace.finalPath != null && trace.finalPath.Count > 0)
+        {
+            position = trace.finalPath[trace.finalPath.Count - 1];
+            return true;
+        }
+
+        return false;
+    }
+
+    private static List<Vector3> BuildAggregateFinalPath(List<PathPlanningVisualizationTrace> traces)
+    {
+        List<Vector3> fullPath = new List<Vector3>();
+        if (traces == null)
+        {
+            return fullPath;
+        }
+
+        for (int i = 0; i < traces.Count; i++)
+        {
+            PathPlanningVisualizationTrace trace = traces[i];
+            List<Vector3> segmentPath = trace != null ? trace.finalPath : null;
+            if (segmentPath == null || segmentPath.Count == 0)
+            {
+                continue;
+            }
+
+            for (int pointIndex = 0; pointIndex < segmentPath.Count; pointIndex++)
+            {
+                Vector3 point = segmentPath[pointIndex];
+                if (fullPath.Count > 0 &&
+                    Vector3.SqrMagnitude(fullPath[fullPath.Count - 1] - point) <= 0.0001f)
+                {
+                    continue;
+                }
+
+                fullPath.Add(point);
+            }
+        }
+
+        return fullPath;
+    }
+
+    private static bool AreAllPlayableTracesSuccessful(List<PathPlanningVisualizationTrace> traces)
+    {
+        if (traces == null)
+        {
+            return false;
+        }
+
+        bool hasTrace = false;
+        for (int i = 0; i < traces.Count; i++)
+        {
+            PathPlanningVisualizationTrace trace = traces[i];
+            if (trace == null || !trace.HasSteps())
+            {
+                continue;
+            }
+
+            hasTrace = true;
+            if (!trace.success)
+            {
+                return false;
+            }
+        }
+
+        return hasTrace;
     }
 
     private static bool ContainsCurrentNodeUpdate(PathPlanningVisualizationStep step)
@@ -689,50 +969,79 @@ public class AlgorithmVisualizerManager : MonoBehaviour
 
     private void RebuildPlaybackSequence()
     {
+        NormalizePlaybackMode();
         playbackSequence.Clear();
 
-        PathPlanningVisualizationTrace trace = GetActiveTrace();
-        if (trace == null || !trace.HasSteps())
+        List<PathPlanningVisualizationTrace> traces = GetActiveTraceList();
+        if (traces == null || traces.Count == 0)
         {
             return;
         }
 
         if (visualizationMode == PathPlanningVisualizationMode.FullProcess)
         {
-            for (int i = 0; i < trace.steps.Count; i++)
+            for (int traceIndex = 0; traceIndex < traces.Count; traceIndex++)
             {
-                playbackSequence.Add(i);
+                PathPlanningVisualizationTrace trace = traces[traceIndex];
+                if (trace == null || !trace.HasSteps())
+                {
+                    continue;
+                }
+
+                for (int stepIndex = 0; stepIndex < trace.steps.Count; stepIndex++)
+                {
+                    playbackSequence.Add(new PlaybackStepRef(traceIndex, stepIndex));
+                }
             }
             return;
         }
 
         if (visualizationMode == PathPlanningVisualizationMode.FinalResultOnly)
         {
-            playbackSequence.Add(trace.steps.Count - 1);
+            for (int traceIndex = 0; traceIndex < traces.Count; traceIndex++)
+            {
+                PathPlanningVisualizationTrace trace = traces[traceIndex];
+                if (trace != null && trace.HasSteps())
+                {
+                    playbackSequence.Add(new PlaybackStepRef(traceIndex, trace.steps.Count - 1));
+                }
+            }
             return;
         }
 
-        int interval = Mathf.Max(1, trace.steps.Count / 24);
-        HashSet<int> selectedIndices = new HashSet<int>();
-        selectedIndices.Add(0);
-        selectedIndices.Add(trace.steps.Count - 1);
-
-        for (int i = 1; i < trace.steps.Count - 1; i++)
+        for (int traceIndex = 0; traceIndex < traces.Count; traceIndex++)
         {
-            PathPlanningVisualizationStep step = trace.steps[i];
-            if (i % interval == 0 ||
-                step.stepType == PathPlanningVisualizationStepType.NodeExpanded ||
-                step.stepType == PathPlanningVisualizationStepType.BacktrackPathUpdated ||
-                step.stepType == PathPlanningVisualizationStepType.FinalPathConfirmed ||
-                step.stepType == PathPlanningVisualizationStepType.SearchFinished)
+            PathPlanningVisualizationTrace trace = traces[traceIndex];
+            if (trace == null || !trace.HasSteps())
             {
-                selectedIndices.Add(i);
+                continue;
+            }
+
+            int interval = Mathf.Max(1, trace.steps.Count / 24);
+            HashSet<int> selectedIndices = new HashSet<int>();
+            selectedIndices.Add(0);
+            selectedIndices.Add(trace.steps.Count - 1);
+
+            for (int i = 1; i < trace.steps.Count - 1; i++)
+            {
+                PathPlanningVisualizationStep step = trace.steps[i];
+                if (i % interval == 0 ||
+                    step.stepType == PathPlanningVisualizationStepType.NodeExpanded ||
+                    step.stepType == PathPlanningVisualizationStepType.BacktrackPathUpdated ||
+                    step.stepType == PathPlanningVisualizationStepType.FinalPathConfirmed ||
+                    step.stepType == PathPlanningVisualizationStepType.SearchFinished)
+                {
+                    selectedIndices.Add(i);
+                }
+            }
+
+            List<int> sortedIndices = new List<int>(selectedIndices);
+            sortedIndices.Sort();
+            for (int i = 0; i < sortedIndices.Count; i++)
+            {
+                playbackSequence.Add(new PlaybackStepRef(traceIndex, sortedIndices[i]));
             }
         }
-
-        List<int> sortedIndices = new List<int>(selectedIndices);
-        sortedIndices.Sort();
-        playbackSequence.AddRange(sortedIndices);
     }
 
     private void RefreshRenderer()
@@ -743,7 +1052,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
             return;
         }
 
-        PathPlanningVisualizationTrace trace = GetActiveTrace();
+        PathPlanningVisualizationTrace trace = GetCurrentPlaybackTrace();
         if (trace == null)
         {
             processRenderer.ClearVisualization();
@@ -785,11 +1094,12 @@ public class AlgorithmVisualizerManager : MonoBehaviour
         obstacleTransparencyController.SetTransparent(shouldMakeTransparent);
     }
 
-    private PathPlanningVisualizationTrace GetActiveTrace()
+    private List<PathPlanningVisualizationTrace> GetActiveTraceList()
     {
-        if (selectedDroneId >= 0 && tracesByDroneId.TryGetValue(selectedDroneId, out PathPlanningVisualizationTrace trace))
+        if (selectedDroneId >= 0 &&
+            tracesByDroneId.TryGetValue(selectedDroneId, out List<PathPlanningVisualizationTrace> traces))
         {
-            return trace;
+            return traces;
         }
 
         if (tracesByDroneId.Count == 0)
@@ -797,7 +1107,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
             return null;
         }
 
-        foreach (KeyValuePair<int, PathPlanningVisualizationTrace> pair in tracesByDroneId)
+        foreach (KeyValuePair<int, List<PathPlanningVisualizationTrace>> pair in tracesByDroneId)
         {
             selectedDroneId = pair.Key;
             return pair.Value;
@@ -806,9 +1116,159 @@ public class AlgorithmVisualizerManager : MonoBehaviour
         return null;
     }
 
+    private PathPlanningVisualizationTrace GetCurrentPlaybackTrace()
+    {
+        if (currentSequenceCursor >= 0 && currentSequenceCursor < playbackSequence.Count)
+        {
+            PathPlanningVisualizationTrace currentTrace = GetTraceAt(playbackSequence[currentSequenceCursor].traceIndex);
+            if (currentTrace != null)
+            {
+                return currentTrace;
+            }
+        }
+
+        return GetFirstPlayableTrace();
+    }
+
+    private PathPlanningVisualizationTrace GetFirstPlayableTrace()
+    {
+        List<PathPlanningVisualizationTrace> traces = GetActiveTraceList();
+        if (traces == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < traces.Count; i++)
+        {
+            if (traces[i] != null && traces[i].HasSteps())
+            {
+                return traces[i];
+            }
+        }
+
+        return null;
+    }
+
+    private PathPlanningVisualizationTrace GetTraceAt(int traceIndex)
+    {
+        List<PathPlanningVisualizationTrace> traces = GetActiveTraceList();
+        if (traces == null || traceIndex < 0 || traceIndex >= traces.Count)
+        {
+            return null;
+        }
+
+        return traces[traceIndex];
+    }
+
+    private List<PathPlanningVisualizationTrace> GetOrCreateTraceList(int droneId)
+    {
+        if (!tracesByDroneId.TryGetValue(droneId, out List<PathPlanningVisualizationTrace> traces) || traces == null)
+        {
+            traces = new List<PathPlanningVisualizationTrace>();
+            tracesByDroneId[droneId] = traces;
+        }
+
+        return traces;
+    }
+
+    private string GetCurrentSegmentLabel()
+    {
+        List<PathPlanningVisualizationTrace> traces = GetActiveTraceList();
+        if (traces == null || traces.Count == 0)
+        {
+            return "0 / 0";
+        }
+
+        int traceIndex = ResolveCurrentTraceIndex();
+        int playableCount = CountPlayableTraces(traces);
+        int playableIndex = CountPlayableTracesBefore(traces, traceIndex) + 1;
+        return $"{Mathf.Clamp(playableIndex, 1, Mathf.Max(1, playableCount))} / {Mathf.Max(1, playableCount)}";
+    }
+
+    private int ResolveCurrentTraceIndex()
+    {
+        if (currentSequenceCursor >= 0 && currentSequenceCursor < playbackSequence.Count)
+        {
+            return playbackSequence[currentSequenceCursor].traceIndex;
+        }
+
+        List<PathPlanningVisualizationTrace> traces = GetActiveTraceList();
+        if (traces == null)
+        {
+            return 0;
+        }
+
+        for (int i = 0; i < traces.Count; i++)
+        {
+            if (traces[i] != null && traces[i].HasSteps())
+            {
+                return i;
+            }
+        }
+
+        return 0;
+    }
+
+    private static int CountPlayableTraces(List<PathPlanningVisualizationTrace> traces)
+    {
+        if (traces == null)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (int i = 0; i < traces.Count; i++)
+        {
+            if (traces[i] != null && traces[i].HasSteps())
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static int CountPlayableTracesBefore(List<PathPlanningVisualizationTrace> traces, int traceIndex)
+    {
+        if (traces == null)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        int end = Mathf.Clamp(traceIndex, 0, traces.Count);
+        for (int i = 0; i < end; i++)
+        {
+            if (traces[i] != null && traces[i].HasSteps())
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
     private bool HasTraceForDrone(int droneId)
     {
         return droneId >= 0 && tracesByDroneId.ContainsKey(droneId);
+    }
+
+    private bool HasPlayableTraceForDrone(int droneId)
+    {
+        if (droneId < 0 || !tracesByDroneId.TryGetValue(droneId, out List<PathPlanningVisualizationTrace> traces))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < traces.Count; i++)
+        {
+            if (traces[i] != null && traces[i].HasSteps())
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private List<int> GetSelectableDroneIds()
@@ -855,10 +1315,49 @@ public class AlgorithmVisualizerManager : MonoBehaviour
         return bestIndex;
     }
 
+    private int ResolvePlaybackModeIndex()
+    {
+        NormalizePlaybackMode();
+        for (int i = 0; i < PlaybackModeOptions.Length; i++)
+        {
+            if (PlaybackModeOptions[i] == visualizationMode)
+            {
+                return i;
+            }
+        }
+
+        return 0;
+    }
+
+    private void NormalizePlaybackMode()
+    {
+        for (int i = 0; i < PlaybackModeOptions.Length; i++)
+        {
+            if (PlaybackModeOptions[i] == visualizationMode)
+            {
+                return;
+            }
+        }
+
+        visualizationMode = PathPlanningVisualizationMode.FullProcess;
+    }
+
     private static Color ResolveDroneAccentColor(int droneId)
     {
         int paletteIndex = Mathf.Abs(droneId) % DroneAccentPalette.Length;
         return DroneAccentPalette[paletteIndex];
+    }
+
+    private readonly struct PlaybackStepRef
+    {
+        public readonly int traceIndex;
+        public readonly int stepIndex;
+
+        public PlaybackStepRef(int traceIndex, int stepIndex)
+        {
+            this.traceIndex = traceIndex;
+            this.stepIndex = stepIndex;
+        }
     }
 
     public sealed class PlaybackRuntimeState
@@ -866,7 +1365,7 @@ public class AlgorithmVisualizerManager : MonoBehaviour
         private readonly Dictionary<string, PathPlanningVisualizationNodeState> nodesByKey = new Dictionary<string, PathPlanningVisualizationNodeState>();
         private readonly Dictionary<string, PathPlanningVisualizationEdgeState> edgesByKey = new Dictionary<string, PathPlanningVisualizationEdgeState>();
         private readonly Queue<string> rejectedEdgeOrder = new Queue<string>();
-        private const int MaxRejectedEdges = 64;
+        private const int MaxRejectedEdges = 256;
 
         public List<Vector3> candidatePath = new List<Vector3>();
         public List<Vector3> backtrackPath = new List<Vector3>();
@@ -962,6 +1461,55 @@ public class AlgorithmVisualizerManager : MonoBehaviour
             }
 
             rejectedEdgeOrder.Clear();
+        }
+
+        public void MergeFrom(PlaybackRuntimeState other, bool copyTransientPaths)
+        {
+            if (other == null)
+            {
+                return;
+            }
+
+            foreach (PathPlanningVisualizationNodeState node in other.Nodes)
+            {
+                SetNode(node);
+            }
+
+            foreach (PathPlanningVisualizationEdgeState edge in other.Edges)
+            {
+                SetEdge(edge);
+            }
+
+            if (!copyTransientPaths)
+            {
+                return;
+            }
+
+            if (other.candidatePath != null && other.candidatePath.Count > 0)
+            {
+                candidatePath = new List<Vector3>(other.candidatePath);
+            }
+
+            if (other.backtrackPath != null && other.backtrackPath.Count > 0)
+            {
+                backtrackPath = new List<Vector3>(other.backtrackPath);
+            }
+
+            if (other.finalPath != null && other.finalPath.Count > 0)
+            {
+                finalPath = new List<Vector3>(other.finalPath);
+            }
+
+            if (!string.IsNullOrWhiteSpace(other.description))
+            {
+                description = other.description;
+            }
+
+            if (other.searchComplete)
+            {
+                searchComplete = true;
+                searchSucceeded = other.searchSucceeded;
+            }
         }
 
         public int CountNodes(PathPlanningVisualizationNodeRole role)

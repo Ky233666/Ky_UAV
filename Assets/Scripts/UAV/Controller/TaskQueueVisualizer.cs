@@ -523,7 +523,10 @@ public class TaskQueueVisualizer : MonoBehaviour
             return "-";
         }
 
-        StringBuilder builder = new StringBuilder();
+        List<string> completedTasks = new List<string>();
+        string currentTask = string.Empty;
+        List<string> pendingTasks = new List<string>();
+
         for (int i = 0; i < data.taskQueue.Length; i++)
         {
             TaskPoint taskPoint = data.taskQueue[i];
@@ -532,24 +535,60 @@ public class TaskQueueVisualizer : MonoBehaviour
                 continue;
             }
 
-            if (builder.Length > 0)
-            {
-                builder.Append(" -> ");
-            }
-
+            string taskName = FormatTaskName(taskPoint);
             if (i < data.currentTaskIndex || taskPoint.currentState == TaskState.Completed)
             {
-                builder.Append('√');
+                completedTasks.Add(taskName);
             }
             else if (i == data.currentTaskIndex)
             {
-                builder.Append('*');
+                currentTask = taskName;
             }
-
-            builder.Append(FormatTaskName(taskPoint));
+            else
+            {
+                pendingTasks.Add(taskName);
+            }
         }
 
+        StringBuilder builder = new StringBuilder();
+        AppendTaskGroup(builder, "完成", completedTasks);
+
+        if (!string.IsNullOrWhiteSpace(currentTask))
+        {
+            AppendSeparator(builder);
+            builder.Append("当前: ").Append(currentTask);
+        }
+
+        AppendTaskGroup(builder, "待执行", pendingTasks);
         return builder.Length > 0 ? builder.ToString() : "-";
+    }
+
+    private static void AppendTaskGroup(StringBuilder builder, string label, List<string> taskNames)
+    {
+        if (builder == null || taskNames == null || taskNames.Count == 0)
+        {
+            return;
+        }
+
+        AppendSeparator(builder);
+        builder.Append(label).Append(": ");
+        for (int i = 0; i < taskNames.Count; i++)
+        {
+            if (i > 0)
+            {
+                builder.Append(", ");
+            }
+
+            builder.Append(taskNames[i]);
+        }
+    }
+
+    private static void AppendSeparator(StringBuilder builder)
+    {
+        if (builder != null && builder.Length > 0)
+        {
+            builder.Append(" | ");
+        }
     }
 
     private static string FormatTaskName(TaskPoint taskPoint)

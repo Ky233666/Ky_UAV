@@ -2,12 +2,13 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// 播放模式：仅最终结果、完整过程或关键步骤摘要。
+/// 播放模式：仅最终结果或完整过程。
 /// </summary>
 public enum PathPlanningVisualizationMode
 {
     FinalResultOnly = 0,
     FullProcess = 1,
+    // Legacy value kept so older scene data can deserialize; runtime UI no longer exposes it.
     KeyMoments = 2
 }
 

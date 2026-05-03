@@ -110,6 +110,11 @@ public class PlanningGridMap
             return true;
         }
 
+        if (!IsWorldInside(from) || !IsWorldInside(to))
+        {
+            return false;
+        }
+
         Vector3 delta = to - from;
         delta.y = 0f;
         float distance = delta.magnitude;
@@ -118,19 +123,69 @@ public class PlanningGridMap
             return !IsBlocked(WorldToGrid(from));
         }
 
-        float sampleStep = Mathf.Max(cellSize * 0.35f, 0.1f);
-        int sampleCount = Mathf.Max(1, Mathf.CeilToInt(distance / sampleStep));
-        for (int i = 0; i <= sampleCount; i++)
+        Vector2Int current = WorldToTraversalGrid(from);
+        Vector2Int end = WorldToTraversalGrid(to);
+        if (IsBlocked(current))
         {
-            float t = i / (float)sampleCount;
-            Vector3 sample = Vector3.Lerp(from, to, t);
-            if (IsBlocked(WorldToGrid(sample)))
+            return false;
+        }
+
+        if (current == end)
+        {
+            return !IsBlocked(end);
+        }
+
+        float startX = WorldToTraversalX(from.x);
+        float startZ = WorldToTraversalZ(from.z);
+        float endX = WorldToTraversalX(to.x);
+        float endZ = WorldToTraversalZ(to.z);
+        float gridDeltaX = endX - startX;
+        float gridDeltaZ = endZ - startZ;
+
+        int stepX = gridDeltaX > 0f ? 1 : gridDeltaX < 0f ? -1 : 0;
+        int stepZ = gridDeltaZ > 0f ? 1 : gridDeltaZ < 0f ? -1 : 0;
+        float tMaxX = CalculateInitialBoundaryT(startX, current.x, stepX, gridDeltaX);
+        float tMaxZ = CalculateInitialBoundaryT(startZ, current.y, stepZ, gridDeltaZ);
+        float tDeltaX = stepX != 0 ? Mathf.Abs(1f / gridDeltaX) : float.PositiveInfinity;
+        float tDeltaZ = stepZ != 0 ? Mathf.Abs(1f / gridDeltaZ) : float.PositiveInfinity;
+        int maxIterations = Mathf.Max(width + height + 4, 16);
+
+        for (int i = 0; i < maxIterations && current != end; i++)
+        {
+            if (tMaxX < tMaxZ)
             {
-                return false;
+                current.x += stepX;
+                tMaxX += tDeltaX;
+                if (IsBlocked(current))
+                {
+                    return false;
+                }
+            }
+            else if (tMaxZ < tMaxX)
+            {
+                current.y += stepZ;
+                tMaxZ += tDeltaZ;
+                if (IsBlocked(current))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                Vector2Int xStepCell = new Vector2Int(current.x + stepX, current.y);
+                Vector2Int zStepCell = new Vector2Int(current.x, current.y + stepZ);
+                current.x += stepX;
+                current.y += stepZ;
+                tMaxX += tDeltaX;
+                tMaxZ += tDeltaZ;
+                if (IsBlocked(xStepCell) || IsBlocked(zStepCell) || IsBlocked(current))
+                {
+                    return false;
+                }
             }
         }
 
-        return true;
+        return !IsBlocked(end);
     }
 
     public bool TryFindNearestWalkableCell(
@@ -199,6 +254,36 @@ public class PlanningGridMap
 
         walkableCell = default;
         return false;
+    }
+
+    private Vector2Int WorldToTraversalGrid(Vector3 worldPosition)
+    {
+        int gx = Mathf.Clamp(Mathf.FloorToInt(WorldToTraversalX(worldPosition.x)), 0, width - 1);
+        int gz = Mathf.Clamp(Mathf.FloorToInt(WorldToTraversalZ(worldPosition.z)), 0, height - 1);
+        return new Vector2Int(gx, gz);
+    }
+
+    private float WorldToTraversalX(float worldX)
+    {
+        float x = Mathf.Clamp(worldX, worldMin.x, worldMax.x);
+        return ((x - worldMin.x) / cellSize) + 0.5f;
+    }
+
+    private float WorldToTraversalZ(float worldZ)
+    {
+        float z = Mathf.Clamp(worldZ, worldMin.z, worldMax.z);
+        return ((z - worldMin.z) / cellSize) + 0.5f;
+    }
+
+    private static float CalculateInitialBoundaryT(float start, int currentCell, int step, float delta)
+    {
+        if (step == 0 || Mathf.Abs(delta) <= 0.000001f)
+        {
+            return float.PositiveInfinity;
+        }
+
+        float nextBoundary = step > 0 ? currentCell + 1f : currentCell;
+        return Mathf.Max(0f, (nextBoundary - start) / delta);
     }
 
     private int ToIndex(Vector2Int gridPosition)
