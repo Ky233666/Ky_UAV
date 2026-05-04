@@ -268,12 +268,12 @@ public class SimulationDashboardStyler : MonoBehaviour
 
         titleText.transform.SetParent(headerBody, false);
         StyleText(titleText, font, 34f, TextPrimary, FontStyles.Bold, TextAlignmentOptions.Left);
-        titleText.text = "KY UAV 指挥台";
+        titleText.text = "Developed by KangYun";
         EnsureLayoutHeight(titleText.gameObject, 46f);
 
         TMP_Text subtitle = CreateOrGetText(SubtitleName, headerBody, font);
         StyleText(subtitle, font, 18f, TextSecondary, FontStyles.Normal, TextAlignmentOptions.Left);
-        subtitle.text = "多无人机协同巡检与算法仿真平台";
+        subtitle.text = "多无人机协同路径规划与调度算法的仿真系统";
         subtitle.enableWordWrapping = false;
         EnsureLayoutHeight(subtitle.gameObject, 26f);
 

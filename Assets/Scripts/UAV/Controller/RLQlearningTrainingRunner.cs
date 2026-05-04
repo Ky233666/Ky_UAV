@@ -11,6 +11,7 @@ public class RLQlearningTrainingRunner : MonoBehaviour
     [Header("Python")]
     public string pythonExecutablePath = "";
     public bool preferProjectVirtualEnvironment = true;
+    public bool allowSystemPythonFallback = true;
     public string trainerScriptName = "train_qlearning.py";
     public int timeoutSeconds = 120;
 
@@ -55,7 +56,8 @@ public class RLQlearningTrainingRunner : MonoBehaviour
         string pythonPath = ResolvePythonExecutable(moduleDirectory);
         if (string.IsNullOrWhiteSpace(pythonPath))
         {
-            LastTrainingMessage = "Python executable not found. Expected RLPathPlanning/.venv/Scripts/python.exe";
+            LastTrainingMessage =
+                "Python executable not found. Expected RLPathPlanning/.venv/Scripts/python.exe or a system python on PATH.";
             return false;
         }
 
@@ -186,6 +188,54 @@ public class RLQlearningTrainingRunner : MonoBehaviour
             if (File.Exists(venvPython))
             {
                 return venvPython;
+            }
+        }
+
+        if (allowSystemPythonFallback)
+        {
+            return ResolveSystemPythonExecutable();
+        }
+
+        return "";
+    }
+
+    private static string ResolveSystemPythonExecutable()
+    {
+        string[] environmentKeys = { "PYTHON", "PYTHON_EXE", "PYTHONHOME" };
+        for (int i = 0; i < environmentKeys.Length; i++)
+        {
+            string value = Environment.GetEnvironmentVariable(environmentKeys[i]);
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            string candidate = value;
+            if (Directory.Exists(candidate))
+            {
+                candidate = Path.Combine(candidate, "python.exe");
+            }
+
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        string pathVariable = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        string[] pathEntries = pathVariable.Split(Path.PathSeparator);
+        for (int i = 0; i < pathEntries.Length; i++)
+        {
+            string directory = pathEntries[i];
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                continue;
+            }
+
+            string candidate = Path.Combine(directory.Trim(), "python.exe");
+            if (File.Exists(candidate))
+            {
+                return candidate;
             }
         }
 
